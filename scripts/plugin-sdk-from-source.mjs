@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 
 import { build } from "esbuild";
 
+import { languageOf, translate } from "../src/messages.ts";
+
 /**
  * Bundles `@openbrf/plugin-sdk` from a checkout of `openbrf/openbrf` into one
  * ES module, for `check:package` to read through `OPENBRF_PLUGIN_SDK`.
@@ -15,7 +17,12 @@ import { build } from "esbuild";
 const [checkout, out] = process.argv.slice(2);
 if (checkout === undefined || out === undefined) {
   console.error(
-    "usage: node scripts/plugin-sdk-from-source.mjs <openbrf checkout> <out.mjs>",
+    translate(
+      languageOf(
+        process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG,
+      ),
+      "cli.sdkFromSourceUsage",
+    ),
   );
   process.exit(2);
 }

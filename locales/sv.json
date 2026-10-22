@@ -24,6 +24,7 @@
   },
   "cli": {
     "packageCheckPasses_one": "{{tarball}}: paketkontrollen godkänner paketet ({{count}} fil).",
-    "packageCheckPasses_other": "{{tarball}}: paketkontrollen godkänner paketet ({{count}} filer)."
+    "packageCheckPasses_other": "{{tarball}}: paketkontrollen godkänner paketet ({{count}} filer).",
+    "sdkFromSourceUsage": "användning: node scripts/plugin-sdk-from-source.mjs <utcheckning av openbrf> <ut.mjs>"
   }
 }

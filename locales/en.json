@@ -24,6 +24,7 @@
   },
   "cli": {
     "packageCheckPasses_one": "{{tarball}}: the package check passes ({{count}} file).",
-    "packageCheckPasses_other": "{{tarball}}: the package check passes ({{count}} files)."
+    "packageCheckPasses_other": "{{tarball}}: the package check passes ({{count}} files).",
+    "sdkFromSourceUsage": "usage: node scripts/plugin-sdk-from-source.mjs <openbrf checkout> <out.mjs>"
   }
 }
