@@ -22,9 +22,11 @@ the licence check, and the limits. The assistants come in later releases.
   own interface, `src/provider.ts`: a system prompt, a conversation, tools the
   model may ask to call, and a limit on the answer. They never see a provider's
   wire format, so the route to a model can change without them. This release
-  has one route, the association's own Anthropic API key (`src/anthropic.ts`).
-  A route hosted by Apteo, which would authenticate with the instance's licence
-  rather than a key, would be a second provider chosen in the gateway.
+  has one route, the association's own Anthropic API key (`src/anthropic.ts`),
+  and the settings offer no choice of route. The gateway takes its route as a
+  constructor option (`route` in `AiGatewayOptions`), which is where a second
+  provider would come in. A route hosted by Apteo, which would authenticate
+  with the instance's licence rather than a key, is left to a later release.
 - **Through the host's way out.** The Anthropic adapter sends every request
   through `host.recipients.fetch` to the recipient the manifest declares,
   `https://api.anthropic.com` (ADR 0037 in openbrf/openbrf). The host applies
