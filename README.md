@@ -125,7 +125,7 @@ the instance is configured, and refuses a connected app.
 pnpm install
 pnpm test            # builds dist/server.cjs and runs the tests
 pnpm typecheck
-pnpm build && pnpm check:package
+pnpm build
 ```
 
 `pnpm test` runs the gateway against a fake provider and the Anthropic adapter
@@ -136,7 +136,8 @@ Fastify and reads the status route.
 The server entry point is one CommonJS bundle, `dist/server.cjs`, whose only
 externals are `@nestjs/common` and Node's built-ins. `pnpm check:package` runs
 the SDK's `pluginPackageProblems` over the packed tarball, as the catalog does
-before it lists a release.
+before it lists a release. With the SDK 1.0.0 it refuses this manifest, so run
+it as described below.
 
 ### Host members newer than the SDK release
 
@@ -153,6 +154,7 @@ against the SDK's source:
 
 ```sh
 node scripts/plugin-sdk-from-source.mjs <checkout of openbrf/openbrf> /tmp/plugin-sdk.mjs
+pnpm build
 OPENBRF_PLUGIN_SDK=/tmp/plugin-sdk.mjs pnpm check:package
 ```
 
