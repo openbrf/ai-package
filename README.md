@@ -71,11 +71,13 @@ When a call finishes, what it used is written first as a record of its own,
 which no other call writes to, and then added to the month's totals. Many calls
 finishing at once compete for the totals, and a call that loses that race
 leaves its record for a later call to add. Until then the month is read as its
-totals plus the calls they do not include yet, so the limit counts every call
-whose record was written. A call goes uncounted only if the process stops, or
-the store refuses the write, between the provider's answer and that record; a
-refused write fails the call. A record added to the totals and not yet deleted
-is not counted twice.
+totals plus the calls they do not include yet, and a record added to the totals
+and not yet deleted is not counted twice. While other calls keep adding to the
+totals during every attempt to read them, the month is instead read in a way
+that may count a call twice, which errs towards the limit. Either way the limit
+counts every call whose record was written before the check. A call goes
+uncounted only if the process stops, or the store refuses the write, between
+the provider's answer and that record; a refused write fails the call.
 
 ## Data protection
 

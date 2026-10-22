@@ -25,6 +25,10 @@ import { type ModelUsage, totalTokens } from "./provider.ts";
  * call records their last write added, so a call record left behind between
  * that write and its deletion is not counted twice.
  *
+ * A month is read exactly when its totals stay the same during the read. When
+ * they change during every attempt, it is read in a way that may count a call
+ * twice, but still counts every call whose record was written before the read.
+ *
  * The monthly limit is checked before a call, and a call already under way is
  * let finish, so a month can end over its limit by what the calls under way at
  * that moment used; the per-minute limit bounds how many those are.
@@ -106,25 +110,40 @@ export class UsageMeter {
    */
   async thisMonth(): Promise<{ month: string; usage: MonthUsage }> {
     const month = stockholmMonth(this.now());
-    let state = await this.monthState(month);
     // The totals and the call records are two reads. When the totals changed
-    // in between, a call record may have been added to them and read as well,
-    // so both are read again. A read that never settles counts such a call
-    // twice, which errs towards the limit.
-    for (let attempt = 1; attempt < ATTEMPTS; attempt++) {
+    // in between, call records may have been added to them and deleted, so
+    // that neither read has them: such a read is not used, and both are read
+    // again.
+    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+      const state = await this.monthState(month);
       const after = await this.records.get<MonthUsageValue>(
         USAGE_COLLECTION,
         monthKey(month),
       );
       if ((after?.revision ?? null) === (state.record?.revision ?? null)) {
-        break;
+        return { month, usage: monthTotal(state) };
       }
-      state = await this.monthState(month);
     }
-    const uncounted = state.calls.filter(
-      (call) => !state.counted.has(call.key),
+    // The totals changed during every read. Read in the other order, the call
+    // records and then the totals: a call record deleted before it was listed
+    // was added to the totals first, and the totals only grow, so every call
+    // whose record was written before this read counts. A call record added to
+    // the totals after it was listed may count twice, which errs towards the
+    // limit.
+    const calls = await this.callRecords(month);
+    const record = await this.records.get<MonthUsageValue>(
+      USAGE_COLLECTION,
+      monthKey(month),
     );
-    return { month, usage: withCalls(state.totals, uncounted) };
+    return {
+      month,
+      usage: monthTotal({
+        record,
+        totals: monthUsage(record),
+        counted: countedCalls(record),
+        calls,
+      }),
+    };
   }
 
   /**
@@ -265,6 +284,18 @@ export class UsageMeter {
       USAGE_COLLECTION,
       monthKey(month),
     );
+    return {
+      record,
+      totals: monthUsage(record),
+      counted: countedCalls(record),
+      calls: await this.callRecords(month),
+    };
+  }
+
+  /** A month's call records, in key order. */
+  private async callRecords(
+    month: string,
+  ): Promise<PluginRecord<CallUsageValue>[]> {
     const prefix = `${month}:`;
     const calls: PluginRecord<CallUsageValue>[] = [];
     let after = prefix;
@@ -285,12 +316,7 @@ export class UsageMeter {
       }
       after = last.key;
     }
-    return {
-      record,
-      totals: monthUsage(record),
-      counted: countedCalls(record),
-      calls,
-    };
+    return calls;
   }
 }
 
@@ -343,6 +369,14 @@ function countedCalls(
     Array.isArray(counted)
       ? counted.filter((key): key is string => typeof key === "string")
       : [],
+  );
+}
+
+/** A month's totals with the call records they do not include. */
+function monthTotal(state: MonthState): MonthUsage {
+  return withCalls(
+    state.totals,
+    state.calls.filter((call) => !state.counted.has(call.key)),
   );
 }
 

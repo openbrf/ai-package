@@ -37,6 +37,8 @@ class ScriptedRecords extends MemoryRecords {
   refuseDelete: (() => Error | null) | null = null;
   /** Runs before a list, as another process could at that moment. */
   beforeList: (() => Promise<void>) | null = null;
+  /** Runs before every list that starts at `after`, until it is cleared. */
+  beforeEachList: ((after: string | undefined) => Promise<void>) | null = null;
 
   override async put<Value extends JsonValue>(
     collection: string,
@@ -74,12 +76,39 @@ class ScriptedRecords extends MemoryRecords {
     const before = this.beforeList;
     this.beforeList = null;
     await before?.();
+    await this.beforeEachList?.(options?.after);
     return super.list(collection, options);
   }
 }
 
 function meter(records: MemoryRecords, now = "2026-10-22T09:41:12Z") {
   return new UsageMeter(records, () => new Date(now));
+}
+
+/**
+ * Another process adds one write's worth of call records to October's totals,
+ * and deletes them, each time a read of October's call records begins: the
+ * totals change during every read. Returns how many times it did.
+ */
+function settleDuringEveryRead(records: ScriptedRecords): () => number {
+  let settled = 0;
+  let busy = false;
+  records.beforeEachList = async (after) => {
+    if (busy || after !== "2026-10:") {
+      return;
+    }
+    busy = true;
+    let writes = 0;
+    records.refuseTotals = () => (writes++ === 0 ? null : new Conflict());
+    try {
+      await meter(records).settle();
+      settled++;
+    } finally {
+      records.refuseTotals = null;
+      busy = false;
+    }
+  };
+  return () => settled;
 }
 
 describe("a call's use", () => {
@@ -164,6 +193,45 @@ describe("a call's use", () => {
     expect((await usage.thisMonth()).usage).toMatchObject({
       inputTokens: 100,
       calls: 1,
+    });
+  });
+
+  it("counts every call when the totals change during every read", async () => {
+    const records = new ScriptedRecords();
+    const usage = meter(records);
+    for (let call = 0; call < 1_000; call++) {
+      await usage.record(USED);
+    }
+    const settled = settleDuringEveryRead(records);
+
+    const { usage: month } = await usage.thisMonth();
+
+    expect(month.calls).toBeGreaterThanOrEqual(1_000);
+    expect(month.inputTokens + month.outputTokens).toBeGreaterThanOrEqual(
+      120_000,
+    );
+    // Eight reads, each changed, then the read that does not undercount.
+    expect(settled()).toBe(9);
+  });
+
+  it("refuses a call over the limit when the totals change during every read", async () => {
+    const records = new ScriptedRecords();
+    const usage = meter(records);
+    for (let call = 0; call < 1_000; call++) {
+      await usage.record(USED);
+    }
+    const settled = settleDuringEveryRead(records);
+
+    expect(
+      await usage.admit({ monthlyTokenLimit: 120_000, requestsPerMinute: 10 }),
+    ).toEqual({ admitted: false, reason: "usage-limit-reached" });
+    expect(settled()).toBe(9);
+
+    records.beforeEachList = null;
+    expect((await usage.thisMonth()).usage).toMatchObject({
+      inputTokens: 100_000,
+      outputTokens: 20_000,
+      calls: 1_000,
     });
   });
 
