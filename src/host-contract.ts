@@ -102,18 +102,27 @@ export interface PluginRecord<Value extends JsonValue = JsonValue> {
   readonly updatedAt: string;
 }
 
-/** `PluginRecords`: the plugin's own records (ADR 0033), the part read here. */
+/** `PluginRecords`: the plugin's own records (ADR 0033). */
 export interface PluginRecords {
   get<Value extends JsonValue>(
     collection: string,
     key: string,
   ): Promise<PluginRecord<Value> | null>;
+  list<Value extends JsonValue>(
+    collection: string,
+    options?: { after?: string; limit?: number },
+  ): Promise<readonly PluginRecord<Value>[]>;
   put<Value extends JsonValue>(
     collection: string,
     key: string,
     value: Value,
     options?: { expectedRevision?: number | null },
   ): Promise<PluginRecord<Value>>;
+  delete(
+    collection: string,
+    key: string,
+    options?: { expectedRevision?: number },
+  ): Promise<boolean>;
 }
 
 /**

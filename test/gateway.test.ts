@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { AiGateway, AiRefusal } from "../src/gateway.ts";
 import type { EntitlementState } from "../src/host-contract.ts";
 import { type ModelRequest, ProviderFailure } from "../src/provider.ts";
-import { USAGE_COLLECTION } from "../src/usage.ts";
+import { CALLS_COLLECTION, USAGE_COLLECTION } from "../src/usage.ts";
 import {
   answer,
   FakeProvider,
@@ -96,7 +96,7 @@ describe("a call within every limit", () => {
 
     await gateway.complete(REQUEST, null);
 
-    expect(records.value(USAGE_COLLECTION, "month:2026-11")).toEqual({
+    expect(records.value(USAGE_COLLECTION, "month:2026-11")).toMatchObject({
       inputTokens: 300,
       outputTokens: 50,
       cacheReadTokens: 7,
@@ -104,6 +104,8 @@ describe("a call within every limit", () => {
       calls: 1,
     });
     expect(records.value(USAGE_COLLECTION, "month:2026-10")).toBeUndefined();
+    // Added to the month's totals, so the call's own record is gone.
+    expect(records.keys(CALLS_COLLECTION)).toEqual([]);
   });
 
   it("reads the settings on every call, so a key the board clears bites at once", async () => {
@@ -239,6 +241,45 @@ describe("the monthly limit", () => {
       outputTokens: 120,
       calls: 6,
     });
+  });
+
+  it("counts every call when more finish at once than a write has attempts", async () => {
+    // The default 10 calls a minute, each admitted before the next arrives,
+    // and all ten answered together: ten writers for one month's totals,
+    // more than the eight attempts each makes.
+    const { gateway, provider, records, clock, logged } = setup();
+    let release = (): void => undefined;
+    provider.gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const calls: Promise<unknown>[] = [];
+    for (let admitted = 1; admitted <= 10; admitted++) {
+      calls.push(gateway.complete(REQUEST, null));
+      while (provider.calls.length < admitted) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    }
+
+    release();
+    await Promise.all(calls);
+
+    expect((await gateway.status()).usage).toEqual({
+      month: "2026-10",
+      tokens: 1200,
+      calls: 10,
+    });
+    expect(logged.filter((each) => each.level !== "info")).toEqual([]);
+
+    // The next call adds any call the others left to it.
+    provider.gate = null;
+    clock.now = new Date("2026-10-22T09:42:00Z");
+    await gateway.complete(REQUEST, null);
+    expect(records.value(USAGE_COLLECTION, "month:2026-10")).toMatchObject({
+      inputTokens: 1100,
+      outputTokens: 220,
+      calls: 11,
+    });
+    expect(records.keys(CALLS_COLLECTION)).toEqual([]);
   });
 
   it("reads a month record it cannot make sense of as nothing used", async () => {

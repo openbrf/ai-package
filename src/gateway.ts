@@ -60,12 +60,14 @@ export class AiRefusal extends Error {
 }
 
 /**
- * The route to a model, chosen from the board's settings.
+ * The route to a model, given the board's settings.
  *
- * Today there is one: the association's own key with Anthropic. A route hosted
- * by Apteo would be a second provider chosen here, declared as a second
- * recipient and authenticated with `host.entitlements.present(audience)`
- * rather than a key; nothing an assistant calls would change.
+ * This release has one, the association's own key with Anthropic, and the
+ * settings offer no choice of route: the gateway takes `ownKeyRoute` unless
+ * its constructor is given another. A route hosted by Apteo, left to a later
+ * release, would come in here, declared as a second recipient and
+ * authenticated with `host.entitlements.present(audience)` rather than a key;
+ * nothing an assistant calls would change.
  */
 export type ProviderRoute = (
   settings: AiSettings,
@@ -248,14 +250,31 @@ export class AiGateway {
     return (await this.host.entitlements?.get()) ?? null;
   }
 
+  /**
+   * Counts what a call used. A call counts once its own record is written,
+   * and a store that refuses that write fails the call. Adding it to the
+   * month's totals can wait for a later call, so a failure there is logged.
+   */
   private async count(
     meter: UsageMeter,
     used: Parameters<UsageMeter["record"]>[0],
   ): Promise<void> {
-    if (!(await meter.record(used))) {
-      this.host.logger.error(
-        "A model call's use could not be counted towards the monthly limit: " +
-          "every attempt to write it lost to another writer.",
+    await meter.record(used);
+    let settled: boolean;
+    try {
+      settled = await meter.settle();
+    } catch (error) {
+      this.host.logger.warn(
+        "A model call's use is counted, but adding it to the month's totals " +
+          `failed (${error instanceof Error ? error.name : "unknown error"}); ` +
+          "a later call adds it.",
+      );
+      return;
+    }
+    if (!settled) {
+      this.host.logger.info(
+        "A model call's use is counted, but other calls kept adding theirs " +
+          "to the month's totals first; a later call adds it.",
       );
     }
   }

@@ -56,16 +56,24 @@ The settings are read again on every call, so a change bites on the next one.
 
 ### The limits
 
-The month's totals and the current minute's count are kept in the package's own
-records (ADR 0033 in openbrf/openbrf), so every process serving the instance
-counts against the same figures. They say nothing about a person: no record
-holds who asked or what for.
+The month's totals, each call's token counts and the current minute's count are
+kept in the package's own records (ADR 0033 in openbrf/openbrf), so every
+process serving the instance counts against the same figures. They say nothing
+about a person: no record holds who asked or what for.
 
 The monthly limit is checked before each call, and a call already under way is
 let finish. A month can therefore end over its limit by what the calls under way
-at that moment used, and the per-minute limit bounds how many those are. Each
-count is written over the revision it read and tried again when another writer
-got there first, so no call is lost from it.
+at that moment used, and the per-minute limit bounds how many those are.
+
+When a call finishes, what it used is written first as a record of its own,
+which no other call writes to, and then added to the month's totals. Many calls
+finishing at once compete for the totals, and a call that loses that race
+leaves its record for a later call to add. Until then the month is read as its
+totals plus the calls they do not include yet, so the limit counts every call
+whose record was written. A call goes uncounted only if the process stops, or
+the store refuses the write, between the provider's answer and that record; a
+refused write fails the call. A record added to the totals and not yet deleted
+is not counted twice.
 
 ## Data protection
 

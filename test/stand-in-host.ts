@@ -55,6 +55,22 @@ export class MemoryRecords implements PluginRecords {
       null) as PluginRecord<Value> | null;
   }
 
+  async list<Value extends JsonValue>(
+    collection: string,
+    options: { after?: string; limit?: number } = {},
+  ): Promise<readonly PluginRecord<Value>[]> {
+    await yieldTurn();
+    const { after, limit = 200 } = options;
+    return [...this.rows.values()]
+      .filter(
+        (record) =>
+          record.collection === collection &&
+          (after === undefined || record.key > after),
+      )
+      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+      .slice(0, limit) as PluginRecord<Value>[];
+  }
+
   async put<Value extends JsonValue>(
     collection: string,
     key: string,
@@ -80,6 +96,34 @@ export class MemoryRecords implements PluginRecords {
     this.rows.set(id, record);
     this.writes++;
     return record;
+  }
+
+  async delete(
+    collection: string,
+    key: string,
+    options: { expectedRevision?: number } = {},
+  ): Promise<boolean> {
+    await yieldTurn();
+    const id = `${collection}/${key}`;
+    const current = this.rows.get(id);
+    if (current === undefined) {
+      return false;
+    }
+    if (
+      options.expectedRevision !== undefined &&
+      options.expectedRevision !== current.revision
+    ) {
+      throw new RecordConflict();
+    }
+    return this.rows.delete(id);
+  }
+
+  /** The records of a collection, by key. */
+  keys(collection: string): string[] {
+    return [...this.rows.values()]
+      .filter((record) => record.collection === collection)
+      .map((record) => record.key)
+      .sort();
   }
 
   value(collection: string, key: string): JsonValue | undefined {
@@ -142,11 +186,14 @@ export class FakeProvider implements ModelProvider {
   readonly name = "Fake";
   readonly calls: ModelCall[] = [];
   readonly answers: (ModelResponse | Error)[] = [];
+  /** When set, every call waits for it before answering. */
+  gate: Promise<void> | null = null;
 
   constructor(readonly model = "fake-model") {}
 
   async complete(call: ModelCall): Promise<ModelResponse> {
     this.calls.push(call);
+    await this.gate;
     await yieldTurn();
     const next = this.answers.shift() ?? answer();
     if (next instanceof Error) {
