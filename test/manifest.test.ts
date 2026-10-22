@@ -6,7 +6,11 @@ import {
   ANTHROPIC_MODELS,
   MODEL_PROVIDER_RECIPIENT,
 } from "../src/anthropic.ts";
-import { aiSettings, SETTINGS_DEFAULTS } from "../src/settings.ts";
+import {
+  aiSettings,
+  API_KEY_MAX_LENGTH,
+  SETTINGS_DEFAULTS,
+} from "../src/settings.ts";
 
 /**
  * What the manifest declares, held to what the code reads: the settings and
@@ -20,6 +24,7 @@ interface Field {
   labelKey: string;
   hintKey?: string;
   default?: unknown;
+  maxLength?: number;
   min?: number;
   max?: number;
   options?: { value: string; labelKey: string }[];
@@ -68,6 +73,22 @@ describe("the manifest", () => {
   it("keeps the key in a secret setting, with no default", () => {
     expect(field("apiKey")).toMatchObject({ type: "secret" });
     expect(field("apiKey")).not.toHaveProperty("default");
+  });
+
+  it("reads a key at the declared length, and none longer", () => {
+    const { maxLength } = field("apiKey");
+    expect(maxLength).toBe(API_KEY_MAX_LENGTH);
+    expect(aiSettings({ apiKey: "k".repeat(maxLength ?? 0) }).apiKey).toBe(
+      "k".repeat(maxLength ?? 0),
+    );
+    // A key kept from an older release, longer than the form now takes.
+    expect(
+      aiSettings({ apiKey: "k".repeat((maxLength ?? 0) + 1) }).apiKey,
+    ).toBe(null);
+    // Blanks around a key are trimmed before its length is judged.
+    expect(
+      aiSettings({ apiKey: ` ${"k".repeat(maxLength ?? 0)} ` }).apiKey,
+    ).toBe("k".repeat(maxLength ?? 0));
   });
 
   it("offers the models the adapter knows, with the code's default", () => {

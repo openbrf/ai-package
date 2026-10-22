@@ -340,6 +340,25 @@ describe("the per-minute limit", () => {
   });
 });
 
+describe("the per-minute limit under contention", () => {
+  it("admits every caller below the limit, however many write at once", async () => {
+    // More callers than the eight writes a conflict was once retried: one
+    // wins each round, so the last loses more than eight times.
+    const { gateway, provider } = setup({
+      settings: { requestsPerMinute: 30 },
+    });
+
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: 24 }, () => gateway.complete(REQUEST, null)),
+    );
+
+    expect(outcomes.map((each) => each.status)).toEqual(
+      Array(24).fill("fulfilled"),
+    );
+    expect(provider.calls).toHaveLength(24);
+  });
+});
+
 describe("a provider that gives no answer", () => {
   it("is refused as provider-failed with its reason, and logged without what was sent", async () => {
     const { gateway, provider, logged } = setup();

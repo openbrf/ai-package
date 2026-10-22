@@ -156,7 +156,10 @@ export class UsageMeter {
       return { admitted: false, reason: "usage-limit-reached" };
     }
 
-    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    // A write that loses to another caller is tried again, however many
+    // there are: each loss means another caller was admitted, and the count
+    // only grows within a minute, so this ends at the limit or at a write.
+    for (;;) {
       const now = this.now();
       const minute = utcMinute(now);
       const record = await this.records.get<RateWindowValue>(
@@ -186,9 +189,6 @@ export class UsageMeter {
         }
       }
     }
-    // Every attempt lost to another caller: the instance is as busy as the
-    // limit allows, so this one waits.
-    return { admitted: false, reason: "rate-limited", retryAfterSeconds: 1 };
   }
 
   /**

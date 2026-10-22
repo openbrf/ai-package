@@ -271,12 +271,17 @@ function usageOf(message: unknown): ModelUsage | null {
   if (inputTokens === null || outputTokens === null) {
     return null;
   }
-  return {
-    inputTokens,
-    outputTokens,
-    cacheReadTokens: count(fields.cache_read_input_tokens) ?? 0,
-    cacheWriteTokens: count(fields.cache_creation_input_tokens) ?? 0,
-  };
+  // The cache counts are optional, and null when a request used no cache. One
+  // that is given and is not a count is not read as none: the month's total
+  // includes them, so a call would count for less than it used.
+  const optional = (value: unknown): number | null =>
+    value === undefined || value === null ? 0 : count(value);
+  const cacheReadTokens = optional(fields.cache_read_input_tokens);
+  const cacheWriteTokens = optional(fields.cache_creation_input_tokens);
+  if (cacheReadTokens === null || cacheWriteTokens === null) {
+    return null;
+  }
+  return { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens };
 }
 
 /**

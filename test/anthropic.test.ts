@@ -389,6 +389,26 @@ describe("what comes back", () => {
       "an answer with a usage it cannot count",
       message({ usage: { input_tokens: -1, output_tokens: 3 } }),
     ],
+    [
+      "an answer with a cache read count it cannot count",
+      message({
+        usage: {
+          input_tokens: 1,
+          output_tokens: 3,
+          cache_read_input_tokens: "7",
+        },
+      }),
+    ],
+    [
+      "an answer with a cache write count it cannot count",
+      message({
+        usage: {
+          input_tokens: 1,
+          output_tokens: 3,
+          cache_creation_input_tokens: -2,
+        },
+      }),
+    ],
   ])("refuses %s", async (_name, body) => {
     const { recipients, provider } = setup();
     recipients.answer(200, body);
@@ -490,5 +510,28 @@ describe("the own-key route", () => {
     await provider?.complete(call());
 
     expect(recipients.sent[0]?.init?.headers?.["x-api-key"]).toBe(KEY);
+  });
+
+  it.each([
+    ["left out", {}],
+    [
+      "null",
+      { cache_read_input_tokens: null, cache_creation_input_tokens: null },
+    ],
+  ])("reads cache counts that are %s as none", async (_name, cache) => {
+    const { recipients, provider } = setup();
+    recipients.answer(
+      200,
+      message({ usage: { input_tokens: 4, output_tokens: 3, ...cache } }),
+    );
+
+    const answer = await provider.complete(call());
+
+    expect(answer.usage).toEqual({
+      inputTokens: 4,
+      outputTokens: 3,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
   });
 });

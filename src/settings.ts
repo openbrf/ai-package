@@ -24,6 +24,9 @@ export const SETTINGS_DEFAULTS = {
   requestsPerMinute: 10,
 } as const satisfies Omit<AiSettings, "apiKey">;
 
+/** The longest key the manifest's `apiKey` setting takes. */
+export const API_KEY_MAX_LENGTH = 512;
+
 const LIMITS = {
   monthlyTokenLimit: { min: 0, max: 1_000_000_000 },
   requestsPerMinute: { min: 1, max: 120 },
@@ -33,11 +36,12 @@ export function aiSettings(
   values: Readonly<Record<string, unknown>>,
 ): AiSettings {
   const { apiKey, model } = values;
+  // A key is never padded; blanks around one are a paste, and a key of blanks
+  // alone is no key. One longer than the manifest allows was kept from an
+  // older release, and is no key either.
+  const key = typeof apiKey === "string" ? apiKey.trim() : "";
   return {
-    // A key is never padded; blanks around one are a paste, and a key of
-    // blanks alone is no key.
-    apiKey:
-      typeof apiKey === "string" && apiKey.trim() !== "" ? apiKey.trim() : null,
+    apiKey: key !== "" && key.length <= API_KEY_MAX_LENGTH ? key : null,
     model: ANTHROPIC_MODELS.includes(model as AnthropicModel)
       ? (model as AnthropicModel)
       : SETTINGS_DEFAULTS.model,
