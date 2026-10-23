@@ -455,6 +455,34 @@ describe("a triage's tokens", () => {
     expect(stand.provider.calls).toHaveLength(1);
   });
 
+  it("makes no first call when calls elsewhere used the month during the reads", async () => {
+    const stand = setup({
+      settings: { monthlyTokenLimit: TRIAGE_TOKEN_BUDGET },
+    });
+    stand.provider.answers.push(costing(turn(triage()), 1_800));
+    const read = stand.queue.invoke;
+    stand.host.actions.invoke = async (request, name, input) => {
+      const answer = await read(request, name, input);
+      if (name === "issue_type_list") {
+        // Another assistant's call, counted after the month was checked for
+        // a whole triage and before the triage's first call.
+        await new UsageMeter(stand.records).record({
+          inputTokens: TRIAGE_TOKEN_BUDGET - 500,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        });
+      }
+      return answer as never;
+    };
+
+    expect(
+      (await refusal(stand.assistant.triage(REQUEST, LEAK.id, "sv"))).reason,
+    ).toBe("too-little-left");
+    expect(stand.provider.calls).toEqual([]);
+    expect(await monthUsed(stand)).toBe(TRIAGE_TOKEN_BUDGET - 500);
+  });
+
   it("makes no call at all for an issue too large for the budget", async () => {
     const stand = setup({
       issues: [{ ...LEAK, description: "Det droppar. ".repeat(3_000) }],

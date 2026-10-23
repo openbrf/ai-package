@@ -304,8 +304,9 @@ export class IssueTriageAssistant {
         throw new TriageRefusal("no-triage");
       }
       // The month was checked for a whole triage before the reads; calls
-      // under way elsewhere may have used some of it since.
-      if (call > 0 && most > (await this.gateway.tokensLeft())) {
+      // under way elsewhere may have used some of it since, also during the
+      // reads and before the first call.
+      if (most > (await this.gateway.tokensLeft())) {
         throw new TriageRefusal("too-little-left");
       }
       const response = await this.gateway.complete(
