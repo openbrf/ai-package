@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  conversationOf,
+  MAX_ANSWER_LENGTH,
+  MAX_CONVERSATION_LENGTH,
   MAX_MESSAGE_LENGTH,
   MAX_MESSAGES,
+} from "../src/assistant/limits.ts";
+import {
+  conversationOf,
   runSiteTurn,
   SITE_DISCLOSURE,
   type SiteTurnResponse,
@@ -466,6 +470,27 @@ describe("the conversation the view sends", () => {
     ["starting with the assistant", [{ role: "assistant", text: "Hej" }]],
     ["blank", [{ role: "user", text: "   " }]],
     ["too long", [{ role: "user", text: "x".repeat(MAX_MESSAGE_LENGTH + 1) }]],
+    [
+      "an answer too long",
+      [
+        { role: "user", text: "Hej" },
+        { role: "assistant", text: "x".repeat(MAX_ANSWER_LENGTH + 1) },
+        { role: "user", text: "Hej" },
+      ],
+    ],
+    [
+      "too long all told",
+      [
+        ...Array.from({ length: 8 }, (_, index) => ({
+          role: index % 2 === 0 ? "user" : "assistant",
+          text:
+            index % 2 === 0
+              ? "Hej"
+              : "x".repeat(Math.ceil(MAX_CONVERSATION_LENGTH / 4)),
+        })),
+        { role: "user", text: "Hej" },
+      ],
+    ],
     ["an extra key", [{ role: "user", text: "Hej", content: [] }]],
     [
       "too many",

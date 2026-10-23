@@ -1,4 +1,7 @@
 {
+  "view": {
+    "title": "AI-assistent"
+  },
   "settings": {
     "apiKey": {
       "label": "API-nyckel för Anthropic",
@@ -20,6 +23,43 @@
     "requestsPerMinute": {
       "label": "Anrop per minut",
       "hint": "Det högsta antalet anrop till modellen som AI-paketet gör under en minut, för hela föreningen."
+    }
+  },
+  "site": {
+    "heading": "Nyheter och sidor",
+    "intro": "Beskriv vad du vill skriva eller ändra i föreningens nyheter och på webbplatsens sidor. Assistenten lägger fram varje ändring som en väntande ändring, och ingenting ändras förrän du har läst och bekräftat den under Väntande ändringar.",
+    "mailingNote": "Assistenten kan inte skicka något till medlemmarna. Den kan begära ett nyhetsutskick, och utskicket går ut först när någon i styrelsen har besvarat begäran på nyhetssidan.",
+    "you": "Du",
+    "assistant": "Assistenten",
+    "promptLabel": "Vad vill du skriva eller ändra?",
+    "send": "Skicka",
+    "working": "Assistenten arbetar …",
+    "newConversation": "Ny konversation",
+    "retry": "Försök igen",
+    "proposals": {
+      "heading": "Väntar på din bekräftelse",
+      "open": "Läs och bekräfta: {{title}}",
+      "expires": "Förfaller {{date}}"
+    },
+    "outcome": {
+      "cutShort": "Svaret blev för långt och slutar mitt i.",
+      "tooManyRounds": "Assistenten blev inte klar. Be den fortsätta, eller dela upp det du vill ha gjort.",
+      "declined": "Assistenten avböjde att svara på det här.",
+      "failed": "Något gick fel på servern. Ändringar som redan lagts fram står nedan.",
+      "repeated": "Den här frågan var redan besvarad.",
+      "inProgress": "Assistenten arbetar fortfarande med din förra fråga. Försök igen om en stund."
+    },
+    "refused": {
+      "host-unsupported": "Den här Open BRF-installationen är för gammal för assistenten.",
+      "entitlement-required": "Föreningen har ingen giltig licens för AI-paketet.",
+      "provider-not-configured": "Ingen API-nyckel är angiven i tilläggets inställningar.",
+      "usage-limit-reached": "Månadens gräns för AI-paketet är nådd. Assistenten kan användas igen när nästa månad börjar.",
+      "rate-limited": "För många frågor just nu. Försök igen om en minut.",
+      "provider-failed": "Språkmodellen svarade inte. Försök igen om en stund."
+    },
+    "error": {
+      "send": "Frågan kunde inte skickas. Kontrollera anslutningen och försök igen.",
+      "forbidden": "Du har inte behörighet att ändra föreningens nyheter och sidor."
     }
   },
   "cli": {

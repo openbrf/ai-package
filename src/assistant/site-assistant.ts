@@ -3,6 +3,12 @@ import type { ActionRequest } from "@openbrf/plugin-sdk";
 import type { AiPackageHost, PluginDisclosure } from "../host-contract.ts";
 import type { ModelMessage } from "../provider.ts";
 import {
+  MAX_ANSWER_LENGTH,
+  MAX_CONVERSATION_LENGTH,
+  MAX_MESSAGE_LENGTH,
+  MAX_MESSAGES,
+} from "./limits.ts";
+import {
   type ModelGateway,
   type Proposal,
   runToolLoop,
@@ -24,12 +30,6 @@ import { Turns } from "./turns.ts";
 
 /** The action groups the assistant works with. */
 export const SITE_GROUPS = ["news", "pages"] as const;
-
-/** The longest conversation the view may send, in messages. */
-export const MAX_MESSAGES = 40;
-
-/** The longest message the view may send, in characters. */
-export const MAX_MESSAGE_LENGTH = 8_000;
 
 /** The most calls to the model one turn makes. */
 const MAX_ROUNDS = 12;
@@ -89,6 +89,7 @@ export function conversationOf(value: unknown): ConversationMessage[] | null {
     return null;
   }
   const messages: ConversationMessage[] = [];
+  let length = 0;
   for (const [index, held] of value.entries()) {
     if (typeof held !== "object" || held === null) {
       return null;
@@ -99,14 +100,16 @@ export function conversationOf(value: unknown): ConversationMessage[] | null {
       role !== expected ||
       typeof text !== "string" ||
       text.trim() === "" ||
-      text.length > MAX_MESSAGE_LENGTH ||
+      text.length >
+        (expected === "user" ? MAX_MESSAGE_LENGTH : MAX_ANSWER_LENGTH) ||
       Object.keys(held).some((key) => key !== "role" && key !== "text")
     ) {
       return null;
     }
+    length += text.length;
     messages.push({ role: expected, text });
   }
-  return messages;
+  return length > MAX_CONVERSATION_LENGTH ? null : messages;
 }
 
 /**

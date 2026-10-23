@@ -1,4 +1,7 @@
 {
+  "view": {
+    "title": "AI assistant"
+  },
   "settings": {
     "apiKey": {
       "label": "Anthropic API key",
@@ -20,6 +23,43 @@
     "requestsPerMinute": {
       "label": "Calls per minute",
       "hint": "The most calls to the model the AI package makes in one minute, for the whole association."
+    }
+  },
+  "site": {
+    "heading": "News and pages",
+    "intro": "Describe what you want to write or change in the association's news and on the website's pages. The assistant puts each change forward as a pending change, and nothing changes until you have read and confirmed it under Pending changes.",
+    "mailingNote": "The assistant cannot send anything to the members. It can request a news mailing, and the mailing goes out only once a board member has answered the request on the news screen.",
+    "you": "You",
+    "assistant": "Assistant",
+    "promptLabel": "What do you want to write or change?",
+    "send": "Send",
+    "working": "The assistant is working …",
+    "newConversation": "New conversation",
+    "retry": "Try again",
+    "proposals": {
+      "heading": "Waiting for your confirmation",
+      "open": "Read and confirm: {{title}}",
+      "expires": "Expires {{date}}"
+    },
+    "outcome": {
+      "cutShort": "The answer grew too long and stops part-way.",
+      "tooManyRounds": "The assistant did not finish. Ask it to carry on, or break what you want done into smaller parts.",
+      "declined": "The assistant declined to answer this.",
+      "failed": "Something went wrong on the server. Changes already put forward are listed below.",
+      "repeated": "This request had already been answered.",
+      "inProgress": "The assistant is still working on your previous request. Try again in a moment."
+    },
+    "refused": {
+      "host-unsupported": "This Open BRF instance is too old for the assistant.",
+      "entitlement-required": "The association holds no valid licence for the AI package.",
+      "provider-not-configured": "No API key has been entered in the plugin's settings.",
+      "usage-limit-reached": "This month's limit for the AI package has been reached. The assistant can be used again when the next month starts.",
+      "rate-limited": "Too many requests right now. Try again in a minute.",
+      "provider-failed": "The language model did not answer. Try again in a moment."
+    },
+    "error": {
+      "send": "The request could not be sent. Check the connection and try again.",
+      "forbidden": "You may not change the association's news and pages."
     }
   },
   "cli": {
