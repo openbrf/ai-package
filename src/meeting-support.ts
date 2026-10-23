@@ -20,10 +20,13 @@ import type { ModelResponse } from "./provider.ts";
  *
  * Both read the meeting through the core's own actions, `meeting_list` and
  * `meeting_get`, which carry the agenda, the decisions as totals and the
- * notice's terms and never a person (ADR 0041 in openbrf/openbrf). The model
+ * notice's terms and never a person (ADR 0041 in openbrf/openbrf). An agenda
+ * draft also reads the motions put to the meeting through
+ * `motion_meeting_list`, which carries each motion's title and whether the
+ * board has acknowledged it and never who submitted it (ADR 0038). The model
  * is offered no tools: it reads what the package hands it and answers with a
- * draft, so text in a meeting's record or in the notes can change a draft and
- * nothing else.
+ * draft, so text in a meeting's record, a motion's title or the notes can
+ * change a draft and nothing else.
  *
  * - An agenda draft is proposed as `meeting_set_agenda`, a pending change the
  *   person who asked confirms or rejects on the platform's own screen (ADR
@@ -94,9 +97,10 @@ const MAX_AGENDA_ITEMS = 100;
 const MAX_TITLE_LENGTH = 300;
 
 /**
- * Text a board member wrote: the agenda's titles, the notice's place, the
- * request and the notes. It can name anybody, and nobody in it is known by an
- * id, so the host records the disclosure once, with no person.
+ * Text people wrote: the agenda's titles, the notice's place and the request,
+ * which the board wrote, and the titles of the motions members put to the
+ * meeting. It can name anybody, and nobody in it is known by an id, so the
+ * host records the disclosure once, with no person.
  */
 const AGENDA_DISCLOSURE: PluginDisclosure = {
   personalData: ["freeText"],
@@ -157,6 +161,35 @@ const meetingListSchema = z.object({
   ),
 });
 
+/**
+ * What `motion_meeting_list` answers with, as far as meeting support reads it.
+ * The motion's id is not read: the model has no use for it.
+ */
+const meetingMotionsSchema = z.object({
+  motions: z.array(
+    z.object({
+      title: z.string(),
+      status: z.enum(["SUBMITTED", "ACKNOWLEDGED"]),
+    }),
+  ),
+  more: z.boolean(),
+});
+
+/**
+ * The motions put to a meeting as the model is handed them, or null where the
+ * package could not read them: on a host without `motion_meeting_list`, or for
+ * a board member who does not hold `motions:handle`, which the host's listing
+ * leaves the action out for.
+ */
+export type MeetingMotions = {
+  readonly motions: readonly {
+    readonly title: string;
+    readonly acknowledged: boolean;
+  }[];
+  /** Whether the host left motions out to keep to its limit. */
+  readonly more: boolean;
+} | null;
+
 /** The model's agenda, checked as `meeting_set_agenda` will check it. */
 const agendaAnswerSchema = z.object({
   items: z
@@ -169,6 +202,12 @@ const agendaAnswerSchema = z.object({
 /** The core actions each draft needs, and that an older host may lack. */
 const AGENDA_ACTIONS = ["meeting_list", "meeting_get", "meeting_set_agenda"];
 const MINUTES_ACTIONS = ["meeting_get"];
+
+/**
+ * The read an agenda draft uses where the host offers it, and does without
+ * where it does not: the draft then says where the motions belong.
+ */
+const MOTIONS_ACTION = "motion_meeting_list";
 
 export class MeetingSupport {
   constructor(
@@ -183,7 +222,8 @@ export class MeetingSupport {
    * Refused before any call to the model once the notice is out or the
    * meeting is held, since the agenda can then no longer be set. The draft
    * starts from the agenda of the last meeting of the same kind that was held,
-   * where there is one.
+   * where there is one, and lists the motions put to the meeting where the
+   * host lets the package read them.
    */
   async draftAgenda(
     request: ActionRequest,
@@ -198,7 +238,7 @@ export class MeetingSupport {
     if (actions.propose === undefined) {
       throw new MeetingSupportRefusal("host-unsupported");
     }
-    await this.requireActions(request, AGENDA_ACTIONS);
+    const offered = await this.requireActions(request, AGENDA_ACTIONS);
 
     const meeting = await this.readMeeting(request, meetingId);
     if (meeting.concludedAt !== null) {
@@ -208,6 +248,9 @@ export class MeetingSupport {
       throw new MeetingSupportRefusal("notice-already-issued");
     }
     const previous = await this.previousMeeting(request, meeting);
+    const motions = offered.has(MOTIONS_ACTION)
+      ? await this.readMotions(request, meeting.id)
+      : null;
 
     const response = await this.gateway.complete(
       {
@@ -215,7 +258,12 @@ export class MeetingSupport {
         messages: [
           {
             role: "user",
-            content: agendaPrompt(meeting, previous, options.instructions),
+            content: agendaPrompt(
+              meeting,
+              previous,
+              motions,
+              options.instructions,
+            ),
           },
         ],
         maxOutputTokens: 16_000,
@@ -287,17 +335,43 @@ export class MeetingSupport {
    * model is called and the month's tokens spent on a draft that could not be
    * proposed. The route requires `meetings:manage`, which the three actions
    * require, so an action missing here is one the host does not offer.
+   *
+   * Answers with every action the host offers this board member, so a draft
+   * can tell whether it may also read one it does without where it must.
    */
   private async requireActions(
     request: ActionRequest,
     names: readonly string[],
-  ): Promise<void> {
+  ): Promise<ReadonlySet<string>> {
     const offered = new Set(
       (await this.host.actions.list(request)).map((action) => action.name),
     );
     if (names.some((name) => !offered.has(name))) {
       throw new MeetingSupportRefusal("host-unsupported");
     }
+    return offered;
+  }
+
+  /**
+   * The motions put to the meeting, by `motion_meeting_list`: each one's title
+   * and whether the board has acknowledged it, and nothing about who submitted
+   * it, which the action does not carry. Its refusals reach the route as they
+   * are.
+   */
+  private async readMotions(
+    request: ActionRequest,
+    meetingId: string,
+  ): Promise<MeetingMotions> {
+    const read = meetingMotionsSchema.parse(
+      await this.host.actions.invoke(request, MOTIONS_ACTION, { meetingId }),
+    );
+    return {
+      motions: read.motions.map((motion) => ({
+        title: motion.title,
+        acknowledged: motion.status === "ACKNOWLEDGED",
+      })),
+      more: read.more,
+    };
   }
 
   /** One meeting, by `meeting_get`. Its refusals reach the route as they are. */
