@@ -4,8 +4,11 @@ An [Open BRF](https://github.com/openbrf/openbrf) plugin that gives a housing
 cooperative's board assistants built on a language model, on the association's
 own model provider account and within a monthly limit the board sets.
 
-This release is the package's foundation: the settings, the way to the model,
-the licence check, and the limits. The assistants come in later releases.
+The package's foundation is the settings, the way to the model, the licence
+check and the limits. Its first assistant is the
+[document assistant](#the-document-assistant), which answers the board's
+questions from the association's own documents. The other assistants come in
+later releases.
 
 ## How it works
 
@@ -42,6 +45,105 @@ the licence check, and the limits. The assistants come in later releases.
   model Anthropic recommends for that kind of decline. Claude Haiku 5.5 has
   none. A request that is declined all the same comes back with the stop reason
   `refusal`.
+
+## The document assistant
+
+A board member asks a question, and the assistant answers it from the
+association's document archive, naming the documents and the pages the answer
+rests on. When the documents do not settle the question, it says so, with the
+documents it read, instead of answering.
+
+- **It reads as the person who asked.** The model reads the archive through the
+  core's two document reads, `document_list` and `document_get` (ADR 0041 in
+  openbrf/openbrf). The package dispatches them through `host.actions.invoke`
+  with the request it is serving, so the host records them on the `ai` channel
+  (ADR 0038) and the archive's own rule decides what they return: what that
+  person may read on the archive's screen, and never the board's shelf, which
+  the reads do not offer. The model is offered those two reads, as the host
+  lists them to that person, and no other action.
+- **Every answer has a source that was read.** The model finishes with one of
+  two tools of the package's own: `give_answer`, with the answer and its
+  sources, or `report_no_answer`. A source must be a document the
+  conversation read with `document_get`, and its pages ones that came back
+  with text. A source that was not read is refused back to the model, which
+  may read it or correct the answer. A model that never gives a source it
+  read gives no answer at all. The board member sees each source's title,
+  binder and pages as the archive names them, never as the model wrote them.
+  What the package checks is that the cited pages were read. Whether they say
+  what the answer says is for the board member to see on those pages.
+- **Document text is data.** The model is told that what the reads return was
+  written by people and is never an instruction, and the reads' own
+  descriptions say the same. The only tools are reads and the two that end
+  the question, so nothing a document says can make the assistant change
+  anything.
+- **Bounded per question.** At most 10 calls to the model, 6 tool calls
+  answered in one turn, and 300,000 characters of document text read: about
+  75,000 tokens, since every call sends what was read again. Each request asks
+  the provider to cache the conversation so far, so a later call of the same
+  question can read what an earlier one sent at the cache's lower rate; a
+  conversation shorter than the provider's smallest cacheable length is not
+  cached. Each call counts against the monthly limit and the per-minute limit
+  like any other, and the monthly limit counts tokens read from the cache as
+  it counts any other.
+- **Scanned documents are not read.** A PDF without a text layer is a set of
+  pictures, and the core reads no pictures. The assistant says so when such a
+  document is the one the question is about.
+- **Nothing is kept.** Not the question, not what was read, not the answer:
+  the package's records hold the usage counts only, and the log holds no text.
+
+### The route
+
+`POST /api/plugin/ai-package/documents/ask` with `{ "question": "..." }`, at
+most 2,000 characters. It requires `documents:manage`, the board's, because
+every question is paid for on the association's key. A connected app is
+refused: it has a model of its own and reaches the same reads through the MCP
+Connector.
+
+It answers `200` with one of:
+
+```jsonc
+{
+  "outcome": "answered",
+  "answer": "Styrelsen består av lägst tre och högst sju ledamöter (§ 14).",
+  "sources": [
+    {
+      "id": "…",
+      "title": "Stadgar 2024",
+      "category": "Stadgar",
+      "audience": "MEMBER",
+      "pages": [2],
+    },
+  ],
+}
+```
+
+```jsonc
+{
+  "outcome": "not-in-documents",
+  "explanation": "…",
+  "consulted": [
+    { "id": "…", "title": "…", "category": "…", "audience": "MEMBER" },
+  ],
+}
+```
+
+When there is no answer it says why, with `reason` and a `message` in the
+language the request asks for (Swedish unless English):
+
+| Status | `reason`                  | Why                                                                                        |
+| ------ | ------------------------- | ------------------------------------------------------------------------------------------ |
+| 400    | `question-invalid`        | No question, a question too long, or a body with other fields.                             |
+| 403    | `entitlement-required`    | No active licence for the AI package.                                                      |
+| 422    | `model-declined`          | The model declined the question.                                                           |
+| 429    | `usage-limit-reached`     | This month's limit is used up.                                                             |
+| 429    | `rate-limited`            | Too many calls this minute, here or at the provider; `retryAfterSeconds` when anyone said. |
+| 501    | `host-unsupported`        | The instance is older than the package.                                                    |
+| 502    | `provider-failed`         | The provider gave no answer.                                                               |
+| 502    | `no-answer`               | The model gave no answer the assistant could check within its calls.                       |
+| 503    | `provider-not-configured` | No API key is entered.                                                                     |
+| 503    | `documents-unavailable`   | The host offers this person no document reads on the `ai` surface.                         |
+
+The package has no screen of its own yet. The route is what one calls.
 
 ## Settings
 
@@ -82,11 +184,22 @@ the provider's answer and that record; a refused write fails the call.
 ## Data protection
 
 The assistants send the association's text to Anthropic: issue reports,
-messages from residents and the board's own drafts. That text can name
-residents and their apartments, and residents sometimes write about their
-health. The manifest declares this for the board to read on the consent screen
-before the package is installed: the personal-data categories `name`,
-`apartment`, `freeText` and `health`, and the one recipient that receives them.
+messages from residents, the board's own drafts, and the text of the documents
+the document assistant reads. That text can name residents and their
+apartments, and residents sometimes write about their health. The manifest
+declares this for the board to read on the consent screen before the package
+is installed: the personal-data categories `name`, `apartment`, `freeText` and
+`health`, and the one recipient that receives them.
+
+Each call to the model tells the host which categories it carries: free text
+for the question, and the categories each read the conversation holds declares
+(`name` and `freeText` for the document reads). It names no person as a
+subject, because the document text names people only as text, and the package
+has no id for them. So the host records each call's disclosure once, naming
+nobody. The text of a document is not scanned or redacted: a document that
+names a person with protected personal data sends that name to the provider if
+a board member asks about it, as the core's data protection page for the AI
+package sets out.
 
 The association brings its own API key, so the association is the controller
 and Anthropic its processor, under the agreement the association accepted with
@@ -128,10 +241,12 @@ pnpm typecheck
 pnpm build
 ```
 
-`pnpm test` runs the gateway against a fake provider and the Anthropic adapter
-against a stand-in for the host's way out, with the package's records in
-memory. It also loads the bundle the package ships into a NestJS application on
-Fastify and reads the status route.
+`pnpm test` runs the gateway and the document assistant against a fake
+provider, the Anthropic adapter against a stand-in for the host's way out, and
+the document reads against a stand-in for the core's, with the package's
+records in memory. It also loads the bundle the package ships into a NestJS
+application on Fastify and calls the status route and the document assistant's
+route.
 
 The server entry point is one CommonJS bundle, `dist/server.cjs`, whose only
 externals are `@nestjs/common` and Node's built-ins. `pnpm check:package` runs

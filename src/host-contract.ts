@@ -150,10 +150,70 @@ export interface ActionClient {
   readonly clientHost: string | null;
 }
 
-/** `PluginActions`, with `client` where the host has it. */
-export type AiPackageActions = PluginHost["actions"] & {
+/**
+ * `ActionWithSchemas`: one action as `host.actions.list` offers it, with the
+ * JSON Schema of what it takes and what it returns (ADR 0038). A host from
+ * before the schemas lists the summary alone, so both are optional here.
+ */
+export interface ListedAction {
+  readonly name: string;
+  readonly description: string;
+  readonly group: string;
+  readonly personalData: readonly string[];
+  readonly inputSchema?: Record<string, unknown>;
+  readonly outputSchema?: Record<string, unknown>;
+}
+
+/** `PluginActionFilter`. */
+export interface ListFilter {
+  readonly surface?: "ui" | "mcp" | "ai";
+  readonly group?: string;
+}
+
+/** `PluginActions`, with the listing's schemas and `client` where the host has them. */
+export type AiPackageActions = Omit<PluginHost["actions"], "list"> & {
+  readonly list: (
+    request: ActionRequest,
+    filter?: ListFilter,
+  ) => Promise<ListedAction[]>;
   readonly client?: (request: ActionRequest) => ActionClient | null;
 };
+
+/** `ActionRefusal`: what `host.actions.invoke` rejects with when it refused. */
+export interface ActionRefusalFields {
+  readonly kind: "registry" | "invalid-body" | "domain";
+  readonly reason: string;
+  readonly retry: "never" | "after-edit" | "after-backoff";
+  /** For an invalid body, each failing field's path and message. */
+  readonly issues: readonly unknown[];
+}
+
+/**
+ * The refusal an `invoke` rejected with, or null when it failed rather than
+ * being refused. Read by its fields, as the SDK's `isActionRefusal` reads it:
+ * the host builds the error, and this bundle has no copy of its class.
+ */
+export function actionRefusalOf(error: unknown): ActionRefusalFields | null {
+  if (!(error instanceof Error) || error.name !== "ActionRefusal") {
+    return null;
+  }
+  const { kind, reason, retry, details } = error as Error &
+    Partial<Record<"kind" | "reason" | "retry" | "details", unknown>>;
+  if (
+    (kind !== "registry" && kind !== "invalid-body" && kind !== "domain") ||
+    typeof reason !== "string" ||
+    (retry !== "never" && retry !== "after-edit" && retry !== "after-backoff")
+  ) {
+    return null;
+  }
+  let issues: readonly unknown[] = [];
+  if (typeof details === "function") {
+    const published = (details as () => unknown).call(error);
+    const listed = (published as { issues?: unknown } | null)?.issues;
+    issues = Array.isArray(listed) ? listed : [];
+  }
+  return { kind, reason, retry, issues };
+}
 
 /** The host object, with the members above where the host has them. */
 export type AiPackageHost = Omit<PluginHost, "actions"> & {

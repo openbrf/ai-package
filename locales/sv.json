@@ -26,5 +26,17 @@
     "packageCheckPasses_one": "{{tarball}}: paketkontrollen godkänner paketet ({{count}} fil).",
     "packageCheckPasses_other": "{{tarball}}: paketkontrollen godkänner paketet ({{count}} filer).",
     "sdkFromSourceUsage": "användning: node scripts/plugin-sdk-from-source.mjs <utcheckning av openbrf> <ut.mjs>"
+  },
+  "refusals": {
+    "questionInvalid": "Skriv en fråga på högst {{max}} tecken.",
+    "hostUnsupported": "Den här installationen av Open BRF är äldre än AI-paketet. Uppdatera den för att använda assistenterna.",
+    "entitlementRequired": "Installationen har ingen giltig licens för AI-paketet. Ange en på licenssidan.",
+    "providerNotConfigured": "Ingen API-nyckel för Anthropic är angiven. Ange föreningens nyckel i AI-paketets inställningar.",
+    "usageLimitReached": "Månadens gräns för AI-paketet är förbrukad. Assistenterna fungerar igen när nästa månad börjar, eller när gränsen höjs i inställningarna.",
+    "rateLimited": "Assistenten får för många frågor just nu. Försök igen om en minut.",
+    "providerFailed": "Språkmodellen gav inget svar just nu. Försök igen senare.",
+    "documentsUnavailable": "Assistenten kan inte läsa dokumentarkivet på den här installationen.",
+    "modelDeclined": "Språkmodellen avböjde att svara på frågan.",
+    "noAnswer": "Assistenten hittade inget svar som den kunde knyta till ett dokument. Fråga igen, gärna mer avgränsat."
   }
 }

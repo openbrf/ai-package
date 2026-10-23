@@ -237,6 +237,8 @@ export interface StandInOptions {
   entitlement?: EntitlementState;
   /** Whether `actions.client` names a connected app for every request. */
   connectedApp?: boolean;
+  /** The host's action dispatch, in place of one that offers nothing. */
+  actions?: Pick<AiPackageHost["actions"], "list" | "invoke">;
 }
 
 export function standIn(options: StandInOptions = {}): StandIn {
@@ -272,6 +274,7 @@ export function standIn(options: StandInOptions = {}): StandIn {
       register: () => undefined,
       list: async () => [],
       invoke: async () => undefined,
+      ...options.actions,
       client: () =>
         options.connectedApp === true
           ? { clientId: "client-1", clientHost: "client.example" }
