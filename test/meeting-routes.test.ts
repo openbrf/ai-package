@@ -249,6 +249,56 @@ describe("the meeting support routes", () => {
     expect(stand.recipients.sent).toHaveLength(0);
   });
 
+  it.each([
+    ["agenda-draft", {}],
+    ["minutes-draft", { notes: "Mötet öppnades 18.00." }],
+  ])(
+    "refuse a %s whose meeting record holds a personal identity number before anything is sent",
+    async (route, body) => {
+      const stand = await serve(
+        {},
+        {
+          ...MEETING,
+          agendaItemCount: 1,
+          agenda: [
+            {
+              id: "item-a",
+              position: 1,
+              title: "Motion från Anna Berg, 811228-9874",
+              decision: null,
+            },
+          ],
+        },
+      );
+
+      const response = await stand.post(`${MEETING.id}/${route}`, body);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        reason: "personal-identity-number",
+      });
+      expect(stand.recipients.sent).toHaveLength(0);
+    },
+  );
+
+  it.each([
+    ["agenda-draft", {}, AGENDA],
+    ["minutes-draft", { notes: "Mötet öppnades 18.00." }, "PROTOKOLL"],
+  ])(
+    "tell the host a %s carries every category the manifest declares",
+    async (route, body, text) => {
+      const stand = await serve();
+      stand.recipients.answer(200, message(text));
+
+      await stand.post(`${MEETING.id}/${route}`, body);
+
+      expect(stand.recipients.sent[0]?.init?.disclosure).toEqual({
+        personalData: ["name", "apartment", "freeText", "health"],
+        subjects: [],
+      });
+    },
+  );
+
   it("answer a draft past the month's limit as too many", async () => {
     const stand = await serve({ settings: { monthlyTokenLimit: 0 } });
 

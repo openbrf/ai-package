@@ -5,8 +5,10 @@ import type { AiGateway } from "./gateway.ts";
 import type { AiPackageHost, PluginDisclosure } from "./host-contract.ts";
 import {
   AGENDA_OUTPUT_SCHEMA,
+  agendaInput,
   agendaPrompt,
   agendaSystem,
+  minutesInput,
   minutesPrompt,
   minutesSystem,
   MOTION_ITEM_LIMIT,
@@ -49,8 +51,10 @@ import type { ModelResponse } from "./provider.ts";
  * - `meeting-already-held`: the meeting is recorded as held.
  * - `no-draft`: the model declined, ran out of room, or answered with
  *   something that is not a draft. Nothing was proposed.
- * - `personal-identity-number`: the request or the notes hold a personal
- *   identity number, which is not sent to the model provider.
+ * - `personal-identity-number`: the request, the notes or the meeting's
+ *   record hold a personal identity number, which is not sent to the model
+ *   provider. The record is the agenda's titles, the previous meeting's
+ *   agenda and the notice's place and digital participation.
  */
 export type MeetingSupportReason =
   | "host-unsupported"
@@ -98,19 +102,16 @@ const MAX_AGENDA_ITEMS = 100;
 const MAX_TITLE_LENGTH = 300;
 
 /**
- * Text people wrote: the agenda's titles, the notice's place and the request,
- * which the board wrote, and the titles of the motions members put to the
- * meeting. It can name anybody, and nobody in it is known by an id, so the
- * host records the disclosure once, with no person.
+ * What either draft sends: text people wrote, in the agenda's titles, the
+ * notice's place, the request and the notes, which the board wrote, and the
+ * titles of the motions members put to the meeting. None of it is held to a form, so
+ * it can carry every category the manifest declares: the names of members who
+ * spoke, were elected or put a motion, their apartments, and what residents
+ * said about their health. Nobody in it is known by an id, so the host records
+ * the disclosure once, with no person.
  */
-const AGENDA_DISCLOSURE: PluginDisclosure = {
-  personalData: ["freeText"],
-  subjects: [],
-};
-
-/** Minutes notes name who spoke and who was elected, besides the free text. */
-const MINUTES_DISCLOSURE: PluginDisclosure = {
-  personalData: ["name", "freeText"],
+const MEETING_DISCLOSURE: PluginDisclosure = {
+  personalData: ["name", "apartment", "freeText", "health"],
   subjects: [],
 };
 
@@ -160,6 +161,7 @@ const meetingListSchema = z.object({
       concludedAt: z.string().nullable(),
     }),
   ),
+  more: z.boolean(),
 });
 
 /**
@@ -193,6 +195,14 @@ export type MeetingMotions = {
    */
   readonly more: boolean;
 } | null;
+
+type MeetingSummary = z.infer<typeof meetingListSchema>["meetings"][number];
+
+/** The most meetings `meeting_list` answers with at once. */
+const MEETINGS_PER_LIST = 50;
+
+/** The first year `meeting_list` takes. */
+const FIRST_LISTED_YEAR = 1900;
 
 /** The model's agenda, checked as `meeting_set_agenda` will check it. */
 const agendaAnswerSchema = z.object({
@@ -255,26 +265,18 @@ export class MeetingSupport {
     const motions = offered.has(MOTIONS_ACTION)
       ? await this.readMotions(request, meeting.id)
       : null;
+    const input = agendaInput(meeting, previous, motions, options.instructions);
+    refuseIdentityNumbers(input);
 
     const response = await this.gateway.complete(
       {
         system: agendaSystem(options.language),
-        messages: [
-          {
-            role: "user",
-            content: agendaPrompt(
-              meeting,
-              previous,
-              motions,
-              options.instructions,
-            ),
-          },
-        ],
+        messages: [{ role: "user", content: agendaPrompt(input) }],
         maxOutputTokens: 16_000,
         effort: "low",
         outputSchema: AGENDA_OUTPUT_SCHEMA,
       },
-      AGENDA_DISCLOSURE,
+      MEETING_DISCLOSURE,
     );
     const answer = agendaAnswer(response);
 
@@ -309,20 +311,20 @@ export class MeetingSupport {
     refuseIdentityNumbers(options.notes);
     await this.requireActions(request, MINUTES_ACTIONS);
     const meeting = await this.readMeeting(request, meetingId);
+    const input = minutesInput(meeting, options.notes);
+    refuseIdentityNumbers(input);
 
     const response = await this.gateway.complete(
       {
         system: minutesSystem(options.language),
-        messages: [
-          { role: "user", content: minutesPrompt(meeting, options.notes) },
-        ],
+        messages: [{ role: "user", content: minutesPrompt(input) }],
         maxOutputTokens: 32_000,
         effort: "medium",
         // A long meeting's minutes take a while to write, and the host waits
         // no longer than this on a recipient.
         timeoutMs: 300_000,
       },
-      MINUTES_DISCLOSURE,
+      MEETING_DISCLOSURE,
     );
     if (response.stop === "refusal") {
       throw new MeetingSupportRefusal("no-draft");
@@ -390,38 +392,91 @@ export class MeetingSupport {
 
   /**
    * The last meeting of the same kind that was held before this one, with its
-   * agenda, or null. Fifty meetings is the most `meeting_list` answers with,
-   * and decades of an association's meetings.
+   * agenda, or null.
+   *
+   * The most recent fifty meetings come first, which is decades of an
+   * association's meetings. Where none of them fits and older ones were left
+   * out, the years before are read one at a time, back to the first year
+   * with no meeting at all: an association holds an ordinary meeting every
+   * year, so that year is before its meetings were recorded here.
    */
   private async previousMeeting(
     request: ActionRequest,
     meeting: Meeting,
   ): Promise<Meeting | null> {
-    const { meetings } = meetingListSchema.parse(
-      await this.host.actions.invoke(request, "meeting_list", { limit: 50 }),
-    );
+    const fits = (candidate: MeetingSummary): boolean =>
+      candidate.id !== meeting.id &&
+      candidate.kind === meeting.kind &&
+      candidate.concludedAt !== null &&
+      candidate.heldOn < meeting.heldOn;
+
     // Furthest ahead first, so the first that fits is the most recent.
-    const previous = meetings.find(
-      (candidate) =>
-        candidate.id !== meeting.id &&
-        candidate.kind === meeting.kind &&
-        candidate.concludedAt !== null &&
-        candidate.heldOn < meeting.heldOn,
-    );
+    const latest = await this.listMeetings(request, {});
+    let previous = latest.meetings.find(fits);
+    const oldest = latest.meetings.at(-1);
+    if (previous === undefined && latest.more && oldest !== undefined) {
+      // The oldest year listed may have been cut short, so it is read again.
+      for (
+        let year = Math.min(yearOf(oldest.heldOn), yearOf(meeting.heldOn));
+        previous === undefined && year >= FIRST_LISTED_YEAR;
+        year--
+      ) {
+        const { meetings } = await this.listMeetings(request, { year });
+        if (meetings.length === 0) {
+          break;
+        }
+        previous = meetings.find(fits);
+      }
+    }
     return previous === undefined
       ? null
       : this.readMeeting(request, previous.id);
   }
+
+  /** The meetings `meeting_list` answers with, at most fifty. */
+  private async listMeetings(
+    request: ActionRequest,
+    filter: { readonly year?: number },
+  ): Promise<z.infer<typeof meetingListSchema>> {
+    return meetingListSchema.parse(
+      await this.host.actions.invoke(request, "meeting_list", {
+        ...filter,
+        limit: MEETINGS_PER_LIST,
+      }),
+    );
+  }
+}
+
+/** The calendar year of an ISO date. */
+function yearOf(date: string): number {
+  return Number(date.slice(0, 4));
 }
 
 /**
- * Refuses a board member's text that holds a personal identity number, before
- * anything is read or sent: the recipient is not declared to receive one.
+ * Refuses what would be sent when any text in it holds a personal identity
+ * number: the recipient is not declared to receive one. Called on the board
+ * member's own text before anything is read, and on the whole of what the
+ * model is handed before it is sent, so a number in the meeting's record is
+ * caught too. Each value is read on its own, as the prompt sets it apart.
  */
-function refuseIdentityNumbers(text: string | null): void {
-  if (text !== null && holdsPersonalIdentityNumber(text)) {
+function refuseIdentityNumbers(sent: unknown): void {
+  if (sentTexts(sent).some(holdsPersonalIdentityNumber)) {
     throw new MeetingSupportRefusal("personal-identity-number");
   }
+}
+
+/** Every string and number in a value, as the prompt writes them out. */
+function sentTexts(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (typeof value === "number") {
+    return [String(value)];
+  }
+  if (value === null || typeof value !== "object") {
+    return [];
+  }
+  return Object.values(value).flatMap(sentTexts);
 }
 
 /** The text the model wrote, its blocks joined. */

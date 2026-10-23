@@ -85,9 +85,10 @@ A draft is written in the language the body names, `sv` or `en`, or else the
 request's. A connected app is refused both routes. A refusal answers with a
 `reason`: `notice-already-issued` or `meeting-already-held` (409), `no-draft`
 when the model declined or gave no usable draft (422),
-`personal-identity-number` when the request or the notes hold one, which is
-then not sent anywhere (400), the gateway's reasons
-(see above), and `host-unsupported` (501) on an instance without
+`personal-identity-number` when the request, the notes or the meeting's record
+(the agenda's titles, the previous meeting's agenda, the notice's place and its
+digital participation) hold one, which is then not sent anywhere (400), the
+gateway's reasons (see above), and `host-unsupported` (501) on an instance without
 `meeting_set_agenda` or pending changes. The platform's own refusals, such as
 `meeting-not-found`, come back as the platform gives them.
 

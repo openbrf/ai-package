@@ -53,8 +53,11 @@ function isDay(
   if (monthNumber < 1 || monthNumber > 12 || dayNumber < 1) {
     return false;
   }
-  // Without a century, 29 February is allowed: some century has it.
-  const fullYear = century === undefined ? 2000 : Number(`${century}${year}`);
+  // Without a century, the year is read in the 2000s. Two digits other than 00
+  // make a leap year in every century alike, and 00 is read as 2000, which was
+  // one, so 29 February is allowed exactly where some century has it.
+  const fullYear =
+    century === undefined ? 2000 + Number(year) : Number(`${century}${year}`);
   const length = new Date(Date.UTC(fullYear, monthNumber, 0)).getUTCDate();
   return dayNumber <= length;
 }
