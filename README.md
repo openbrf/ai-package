@@ -63,11 +63,13 @@ documents it read, instead of answering.
   lists them to that person, and no other action.
 - **Every answer has a source that was read.** The model finishes with one of
   two tools of the package's own: `give_answer`, with the answer and its
-  sources, or `report_no_answer`. A source must be a document the
-  conversation read with `document_get`, and its pages ones that came back
-  with text. A source that was not read is refused back to the model, which
-  may read it or correct the answer. A model that never gives a source it
-  read gives no answer at all. The board member sees each source's title,
+  sources, or `report_no_answer`. A source must be a document that
+  `document_get` returned to the model in an earlier turn, and its pages ones
+  that came back with text. A read the model asks for in the same turn as its
+  answer has not reached it yet, so the answer is checked without it, and the
+  read's text goes back to the model with the refusal. A source that was not
+  read is refused back to the model, which may read it or correct the answer.
+  A model that never gives a source it read gives no answer at all. The board member sees each source's title,
   binder and pages as the archive names them, never as the model wrote them.
   What the package checks is that the cited pages were read. Whether they say
   what the answer says is for the board member to see on those pages.
@@ -78,7 +80,9 @@ documents it read, instead of answering.
   anything.
 - **Bounded per question.** At most 10 calls to the model, 6 tool calls
   answered in one turn, and 300,000 characters of document text read: about
-  75,000 tokens, since every call sends what was read again. Each request asks
+  75,000 tokens, since every call sends what was read again. A read that would
+  pass that share is cut short where it does, and says where its text goes
+  on; what is cut off is not sent and cannot be cited. Each request asks
   the provider to cache the conversation so far, so a later call of the same
   question can read what an earlier one sent at the cache's lower rate; a
   conversation shorter than the provider's smallest cacheable length is not
@@ -133,6 +137,7 @@ language the request asks for (Swedish unless English):
 | Status | `reason`                  | Why                                                                                        |
 | ------ | ------------------------- | ------------------------------------------------------------------------------------------ |
 | 400    | `question-invalid`        | No question, a question too long, or a body with other fields.                             |
+| 403    | `connected-app`           | The request came from a connected app.                                                     |
 | 403    | `entitlement-required`    | No active licence for the AI package.                                                      |
 | 422    | `model-declined`          | The model declined the question.                                                           |
 | 429    | `usage-limit-reached`     | This month's limit is used up.                                                             |
@@ -230,7 +235,8 @@ The code is licensed under the [AGPL-3.0](LICENSE).
 `GET /api/plugin/ai-package/status` answers with the licence finding, the
 provider and model, whether a key is entered (never the key), this month's use
 and the two limits. It requires `association:read`, the board's reading of how
-the instance is configured, and refuses a connected app.
+the instance is configured, and refuses a connected app with `403` and the
+reason `connected-app`, as the document assistant's route does.
 
 ## Development
 

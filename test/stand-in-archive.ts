@@ -183,6 +183,8 @@ export class StandInArchive {
       }
       const fromPage =
         typeof fields.fromPage === "number" ? fields.fromPage : 1;
+      const fromCharacter =
+        typeof fields.fromCharacter === "number" ? fields.fromCharacter : 0;
       const toPage =
         typeof fields.toPage === "number" ? fields.toPage : fromPage + 9;
       let left = this.charactersPerRead;
@@ -192,7 +194,9 @@ export class StandInArchive {
         number <= Math.min(toPage, document.pages.length) && left > 0;
         number++
       ) {
-        const text = (document.pages[number - 1] ?? "").slice(0, left);
+        const text = (document.pages[number - 1] ?? "")
+          .slice(number === fromPage ? fromCharacter : 0)
+          .slice(0, left);
         left -= text.length;
         pages.push({ number, text });
       }

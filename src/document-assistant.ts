@@ -28,11 +28,11 @@ import type {
  * It finishes with one of two tools of the package's own, which the core
  * never sees: `give_answer`, with the answer and its sources, or
  * `report_no_answer`, when the documents do not settle the question. A source
- * is checked against what the conversation actually read: a document read
- * with `document_get`, and pages of it that came back with text. One that was
- * not is refused back to the model, which may correct it, so an answer never
- * reaches the board member without a source it was read from. The titles in
- * the answer are the archive's, never the model's.
+ * is checked against what the model actually received: a document read with
+ * `document_get` in an earlier turn, and pages of it that came back with text.
+ * One that was not is refused back to the model, which may correct it, so an
+ * answer never reaches the board member without a source the model was given.
+ * The titles in the answer are the archive's, never the model's.
  *
  * Nothing is kept: not the question, not what was read, not the answer.
  */
@@ -52,7 +52,8 @@ export const MAX_TOOL_CALLS_PER_TURN = 6;
 /**
  * The most document text one question reads, in characters: about 75,000
  * tokens, five calls of `document_get` at its most. Each call to the model
- * sends what was read again, so this is what bounds a question's cost.
+ * sends what was read again, so this is what bounds a question's cost. A read
+ * that would pass it is cut short where it does.
  */
 export const MAX_CHARACTERS_READ = 300_000;
 
@@ -129,7 +130,7 @@ How to work:
 - The board's own shelf is not available to you, so a document filed only there cannot be found.
 
 How to finish: always finish by calling exactly one of these two tools, never with a plain-text answer.
-- ${ANSWER_TOOL}, when what you read answers the question. Give the answer and, as its sources, every document it rests on with the pages the supporting text is on. Name only documents and pages you read with document_get. Every statement in the answer must rest on one of those pages.
+- ${ANSWER_TOOL}, when what you read answers the question. Give the answer and, as its sources, every document it rests on with the pages the supporting text is on. Name only documents and pages a document_get has already returned to you, never one you ask for in the same turn. Every statement in the answer must rest on one of those pages.
 - ${NO_ANSWER_TOOL}, when it does not. Say briefly what you looked for and why it does not answer the question.
 
 Write in the language the question is written in. Be brief and concrete: give the passage that answers the question in its own words or close to them, with its section or paragraph number where the document has one. Write plain text, without Markdown.`;
@@ -141,7 +142,7 @@ const FINISHING_TOOLS: readonly ModelTool[] = [
   {
     name: ANSWER_TOOL,
     description:
-      "Gives the answer to the board member, with the documents and pages it rests on. Call it once, as the last thing you do. Name only documents you read with document_get and pages of them that had text; a source the conversation did not read is refused, and you are told why.",
+      "Gives the answer to the board member, with the documents and pages it rests on. Call it once, as the last thing you do, in a turn of its own. Name only documents a document_get has already returned to you and pages of them that had text; a source you have not received is refused, and you are told why.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -339,33 +340,39 @@ class Session {
   }
 
   /**
-   * Every tool call of one turn, answered in order. The reads run first, one
-   * at a time, so that an answer given in the same turn is checked against
-   * them.
+   * Every tool call of one turn, answered in order.
+   *
+   * An answer is checked first, against what earlier turns read: what this
+   * turn reads reaches the model only with the reply to it, so the model has
+   * not seen it and may not cite it yet. An answer that stands ends the
+   * question, and the turn's reads are not dispatched. Otherwise the reads
+   * run, one at a time, and go back to the model with the refused answer.
    */
   async answer(uses: readonly ModelToolUse[]): Promise<Outcome[]> {
-    const outcomes: (Outcome | undefined)[] = uses.map(() => undefined);
-    for (const [index, use] of uses.entries()) {
+    const outcomes = uses.map((use, index): Outcome | undefined => {
       if (index >= MAX_TOOL_CALLS_PER_TURN) {
-        outcomes[index] = refused(
+        return refused(
           use,
           `At most ${String(MAX_TOOL_CALLS_PER_TURN)} tool calls are answered at once. Call it again in your next turn.`,
         );
-      } else if (this.actions.has(use.name)) {
-        outcomes[index] = await this.dispatch(use);
-      }
-    }
-    for (const [index, use] of uses.entries()) {
-      if (outcomes[index] !== undefined) {
-        continue;
       }
       if (use.name === ANSWER_TOOL) {
-        outcomes[index] = this.answered(use);
-      } else if (use.name === NO_ANSWER_TOOL) {
-        outcomes[index] = this.notAnswered(use);
-      } else {
-        outcomes[index] = refused(use, "There is no tool by that name.");
+        return this.answered(use);
       }
+      if (use.name === NO_ANSWER_TOOL) {
+        return this.notAnswered(use);
+      }
+      if (!this.actions.has(use.name)) {
+        return refused(use, "There is no tool by that name.");
+      }
+      return undefined;
+    });
+    const finished = outcomes.find((outcome) => outcome?.kind === "finished");
+    if (finished !== undefined) {
+      return [finished];
+    }
+    for (const [index, use] of uses.entries()) {
+      outcomes[index] ??= await this.dispatch(use);
     }
     return outcomes as Outcome[];
   }
@@ -412,23 +419,27 @@ class Session {
     for (const category of this.actions.get(use.name)?.personalData ?? []) {
       this.sent.add(category);
     }
-    if (use.name === "document_get") {
-      this.remember(output);
-    }
     return {
       kind: "result",
       result: {
         type: "tool_result",
         toolUseId: use.id,
-        content: JSON.stringify(output),
+        content: JSON.stringify(
+          use.name === "document_get" ? this.remember(use, output) : output,
+        ),
       },
     };
   }
 
-  /** What one `document_get` read, by its published output. */
-  private remember(output: unknown): void {
+  /**
+   * What one `document_get` read, by its published output, cut to the text
+   * the question has left to read. What is cut off is neither sent nor
+   * remembered, so only pages the model receives can be cited, and `next`
+   * says where the cut text begins.
+   */
+  private remember(use: ModelToolUse, output: unknown): unknown {
     if (!isObject(output) || typeof output.id !== "string") {
-      return;
+      return output;
     }
     const reference: DocumentReference = {
       id: output.id,
@@ -441,7 +452,18 @@ class Session {
       pages: new Map<number, boolean>(),
     };
     this.read.set(reference.id, document);
+
+    // The first page read starts where the call asked it to, as the core reads.
+    const input = isObject(use.input) ? use.input : {};
+    const fromPage = Number.isSafeInteger(input.fromPage) ? input.fromPage : 1;
+    const fromCharacter = Number.isSafeInteger(input.fromCharacter)
+      ? (input.fromCharacter as number)
+      : 0;
+    const pages: { number: number; text: string }[] = [];
+    let next: { fromPage: number; fromCharacter: number } | null = null;
     for (const page of Array.isArray(output.pages) ? output.pages : []) {
+      // A page the core's published output does not describe is not sent:
+      // its text could not be counted against what the question may read.
       if (
         !isObject(page) ||
         !Number.isSafeInteger(page.number) ||
@@ -450,12 +472,27 @@ class Session {
         continue;
       }
       const number = page.number as number;
-      this.charactersRead += page.text.length;
+      const start = number === fromPage ? fromCharacter : 0;
+      const left = MAX_CHARACTERS_READ - this.charactersRead;
+      if (left <= 0) {
+        next = { fromPage: number, fromCharacter: start };
+        break;
+      }
+      const text = page.text.slice(0, left);
+      this.charactersRead += text.length;
+      pages.push({ number, text });
       document.pages.set(
         number,
-        document.pages.get(number) === true || page.text.trim() !== "",
+        document.pages.get(number) === true || text.trim() !== "",
       );
+      if (text.length < page.text.length) {
+        next = { fromPage: number, fromCharacter: start + text.length };
+        break;
+      }
     }
+    return next === null
+      ? { ...output, pages }
+      : { ...output, pages, truncated: true, next };
   }
 
   /** `give_answer`, checked against what was read. */
@@ -514,7 +551,7 @@ class Session {
       // The first few say what is wrong; a long list says nothing more.
       return refused(
         use,
-        `The answer was not given. ${problems.slice(0, 5).join(" ")} Name only what you read, or read it first.`,
+        `The answer was not given. ${problems.slice(0, 5).join(" ")} Name only pages a document_get has already returned to you, or read them first.`,
       );
     }
     return {

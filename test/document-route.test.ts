@@ -146,12 +146,26 @@ describe("the document assistant's route", () => {
     expect(recipients.sent).toEqual([]);
   });
 
-  it("refuses a connected app before anything is read", async () => {
+  it("refuses a connected app before anything is read, in its language", async () => {
     const { ask, recipients, archive } = await mount({ connectedApp: true });
 
-    const response = await ask({ question: "Vad står i stadgarna?" });
+    const english = await ask({ question: "Vad står i stadgarna?" }, "en-GB");
+    const swedish = await ask({ question: "Vad står i stadgarna?" }, "sv-SE");
 
-    expect(response.status).toBe(403);
+    expect(english.status).toBe(403);
+    expect(await english.json()).toEqual({
+      statusCode: 403,
+      reason: "connected-app",
+      message:
+        "A connected app cannot use the AI package. The board uses it on Open BRF's own screens.",
+    });
+    expect(swedish.status).toBe(403);
+    expect(await swedish.json()).toEqual({
+      statusCode: 403,
+      reason: "connected-app",
+      message:
+        "En ansluten app kan inte använda AI-paketet. Styrelsen använder det på Open BRF:s egna sidor.",
+    });
     expect(archive.listed).toEqual([]);
     expect(recipients.sent).toEqual([]);
   });

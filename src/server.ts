@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   type DynamicModule,
-  ForbiddenException,
   Get,
   Headers,
   HttpCode,
@@ -73,12 +72,14 @@ export const createPlugin: PluginModuleFactory = (
   @SetMetadata(REQUIRED_CAPABILITIES, ["association:read"])
   class StatusController {
     @Get()
-    async get(@Req() request: ActionRequest): Promise<AiStatus> {
+    async get(
+      @Req() request: ActionRequest,
+      @Headers("accept-language") acceptLanguage: string | undefined,
+    ): Promise<AiStatus> {
       // A host without `actions.client` cannot say who sent the request. The
       // route is behind its session guard all the same.
-      const app = host.actions.client?.(request) ?? null;
-      if (app !== null) {
-        throw new ForbiddenException();
+      if ((host.actions.client?.(request) ?? null) !== null) {
+        throw connectedAppRefused(languageOf(acceptLanguage));
       }
       return gateway.status();
     }
@@ -106,7 +107,7 @@ export const createPlugin: PluginModuleFactory = (
     ): Promise<DocumentAnswer> {
       const language = languageOf(acceptLanguage);
       if ((host.actions.client?.(request) ?? null) !== null) {
-        throw new ForbiddenException();
+        throw connectedAppRefused(language);
       }
       const question = questionOf(body);
       if (question === null) {
@@ -152,6 +153,11 @@ export function questionOf(body: unknown): string | null {
     return null;
   }
   return trimmed;
+}
+
+/** The refusal of a connected app, which neither route serves. */
+function connectedAppRefused(language: Language): HttpException {
+  return refusal(language, 403, "connected-app", "connectedApp");
 }
 
 /** The answer an error gives the board member, in their language. */

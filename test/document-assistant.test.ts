@@ -97,6 +97,8 @@ function turn(...content: ModelAssistantMessage["content"]): ModelResponse {
   };
 }
 
+type ToolUse = ReturnType<typeof use>;
+
 const read = (id: string, fromPage = 1) =>
   use("document_get", { id, fromPage });
 
@@ -300,16 +302,83 @@ describe("an answer from the documents", () => {
     ]);
   });
 
-  it("checks an answer given in the same turn as a read against that read", async () => {
-    const { assistant, provider } = setup();
+  it("accepts an answer from an earlier turn's read, and dispatches none of the same turn's reads", async () => {
+    const { assistant, provider, archive } = setup();
     provider.answers.push(
-      turn(read(BYLAWS.id), give([{ documentId: BYLAWS.id, pages: [2] }])),
+      turn(read(BYLAWS.id)),
+      turn(read(MINUTES.id), give([{ documentId: BYLAWS.id, pages: [2] }])),
     );
 
     const answer = await assistant.ask(REQUEST, QUESTION);
 
     expect(answer.outcome).toBe("answered");
-    expect(provider.calls).toHaveLength(1);
+    expect(provider.calls).toHaveLength(2);
+    expect(archive.dispatched.map((each) => each.input)).toEqual([
+      { id: BYLAWS.id, fromPage: 1 },
+    ]);
+  });
+});
+
+describe("a source read in the same turn as the answer", () => {
+  it.each([
+    ["after the read", (answer: ToolUse, get: ToolUse) => [get, answer]],
+    ["before the read", (answer: ToolUse, get: ToolUse) => [answer, get]],
+  ])(
+    "is refused when the answer comes %s, since the model has not seen it",
+    async (_order, arrange) => {
+      const { assistant, provider } = setup();
+      const get = read(BYLAWS.id);
+      const answer = give([{ documentId: BYLAWS.id, pages: [2] }]);
+      provider.answers.push(
+        turn(...arrange(answer, get)),
+        turn(give([{ documentId: BYLAWS.id, pages: [2] }])),
+      );
+
+      const result = await assistant.ask(REQUEST, QUESTION);
+
+      // The first call carried the question alone; the answer stands only
+      // once the read's text has reached the model in the second.
+      expect(provider.calls[0]?.request.messages).toEqual([
+        { role: "user", content: QUESTION },
+      ]);
+      expect(provider.calls).toHaveLength(2);
+      expect(result.outcome).toBe("answered");
+      const results = resultsSent(provider, 1);
+      expect(results.map((each) => each.toolUseId)).toEqual(
+        arrange(answer, get).map((each) => each.id),
+      );
+      const refused = results.find((each) => each.toolUseId === answer.id);
+      expect(refused).toMatchObject({ isError: true });
+      expect(refused?.content).toContain(
+        '"doc-bylaws" is not a document this conversation read with document_get.',
+      );
+      const delivered = results.find((each) => each.toolUseId === get.id);
+      expect(JSON.parse(delivered?.content ?? "")).toMatchObject({
+        id: BYLAWS.id,
+        pages: expect.arrayContaining([{ number: 2, text: BYLAWS.pages[1] }]),
+      });
+    },
+  );
+
+  it("does not let a page read earlier stand in for one read in the same turn", async () => {
+    const { assistant, provider } = setup();
+    provider.answers.push(
+      turn(use("document_get", { id: BYLAWS.id, fromPage: 1, toPage: 1 })),
+      turn(
+        use("document_get", { id: BYLAWS.id, fromPage: 2, toPage: 2 }),
+        give([{ documentId: BYLAWS.id, pages: [1, 2] }]),
+      ),
+      turn(give([{ documentId: BYLAWS.id, pages: [1, 2] }])),
+    );
+
+    const answer = await assistant.ask(REQUEST, QUESTION);
+
+    expect(resultsSent(provider, 2)[1]?.content).toContain(
+      "doc-bylaws: page 2 was not read with document_get, or had no text.",
+    );
+    expect(answer.outcome === "answered" && answer.sources).toEqual([
+      expect.objectContaining({ id: BYLAWS.id, pages: [1, 2] }),
+    ]);
   });
 });
 
@@ -574,6 +643,94 @@ describe("what one question may spend", () => {
     expect(resultsSent(provider, reads + 1)[0]).toMatchObject({
       isError: true,
       content: expect.stringContaining("as much text as one question may"),
+    });
+  });
+
+  it("cuts a read short where the question's share runs out, and lets only what was sent be cited", async () => {
+    // Every page 20,000 characters but the fifteenth, one short: five reads
+    // of three pages come to 299,999 characters, one below the share.
+    const long: StandInDocument = {
+      id: "doc-long",
+      title: "Underhållsplan",
+      category: "Underhåll",
+      audience: "MEMBER",
+      pages: Array.from({ length: 30 }, (_, index) =>
+        "x".repeat(index === 14 ? 19_999 : 20_000),
+      ),
+    };
+    const { assistant, provider } = setup({ documents: [long] });
+    const pages = (fromPage: number) =>
+      use("document_get", { id: long.id, fromPage, toPage: fromPage + 2 });
+    for (const fromPage of [1, 4, 7, 10, 13, 16]) {
+      provider.answers.push(turn(pages(fromPage)));
+    }
+    provider.answers.push(
+      turn(give([{ documentId: long.id, pages: [17] }])),
+      turn(give([{ documentId: long.id, pages: [16] }])),
+    );
+
+    const answer = await assistant.ask(REQUEST, QUESTION);
+
+    const sent = Array.from({ length: 6 }, (_, call) =>
+      JSON.parse(resultsSent(provider, call + 1)[0]?.content ?? "{}"),
+    );
+    const characters = sent
+      .flatMap((output) => output.pages as { text: string }[])
+      .reduce((total, page) => total + page.text.length, 0);
+    expect(characters).toBe(MAX_CHARACTERS_READ);
+    // The sixth read had room for one character: page 16 begins, and the
+    // rest of it and pages 17 and 18 are not sent.
+    expect(sent[5]).toMatchObject({
+      pages: [{ number: 16, text: "x" }],
+      truncated: true,
+      next: { fromPage: 16, fromCharacter: 1 },
+    });
+    expect(resultsSent(provider, 7)[0]?.content).toContain(
+      "doc-long: page 17 was not read with document_get, or had no text.",
+    );
+    expect(answer.outcome === "answered" && answer.sources).toEqual([
+      expect.objectContaining({ id: long.id, pages: [16] }),
+    ]);
+  });
+
+  it("places the cut from where a read that starts inside a page starts", async () => {
+    const long: StandInDocument = {
+      id: "doc-long",
+      title: "Underhållsplan",
+      category: "Underhåll",
+      audience: "MEMBER",
+      pages: Array.from({ length: 30 }, (_, index) =>
+        "x".repeat(index === 14 ? 19_999 : 20_000),
+      ),
+    };
+    const { assistant, provider } = setup({ documents: [long] });
+    for (const fromPage of [1, 4, 7, 10, 13]) {
+      provider.answers.push(
+        turn(
+          use("document_get", { id: long.id, fromPage, toPage: fromPage + 2 }),
+        ),
+      );
+    }
+    provider.answers.push(
+      turn(
+        use("document_get", {
+          id: long.id,
+          fromPage: 16,
+          fromCharacter: 5_000,
+          toPage: 17,
+        }),
+      ),
+      turn(use(NO_ANSWER_TOOL, { explanation: "För långt." })),
+    );
+
+    await assistant.ask(REQUEST, QUESTION);
+
+    expect(
+      JSON.parse(resultsSent(provider, 6)[0]?.content ?? ""),
+    ).toMatchObject({
+      pages: [{ number: 16, text: "x" }],
+      truncated: true,
+      next: { fromPage: 16, fromCharacter: 5_001 },
     });
   });
 
