@@ -150,10 +150,90 @@ export interface ActionClient {
   readonly clientHost: string | null;
 }
 
-/** `PluginActions`, with `client` where the host has it. */
-export type AiPackageActions = PluginHost["actions"] & {
+/**
+ * `ActionWithSchemas`: one action as `host.actions.list` hands it to a plugin
+ * (ADR 0038, "Schemas in process"), with the fields this package reads.
+ *
+ * A host older than the schemas lists the action without them, and the
+ * package offers a model no tool it cannot describe.
+ */
+export interface ActionWithSchemas {
+  readonly name: string;
+  readonly title: string;
+  readonly description: string;
+  readonly group: string;
+  readonly effect: "read" | "write" | "delete";
+  readonly inputSchema?: Record<string, unknown>;
+}
+
+/**
+ * `PendingChangeReceipt`: what proposing a change answers with (ADR 0039).
+ * Nothing has run; the person confirms or rejects it at `path`.
+ */
+export interface PendingChangeReceipt {
+  readonly id: string;
+  readonly expiresAt: Date;
+  readonly path: string;
+}
+
+/** `PluginActions`, with the members newer than the SDK where the host has them. */
+export type AiPackageActions = Omit<PluginHost["actions"], "list"> & {
+  readonly list: (
+    request: ActionRequest,
+    filter?: {
+      readonly surface?: "ui" | "mcp" | "ai";
+      readonly group?: string;
+    },
+  ) => Promise<readonly ActionWithSchemas[]>;
+  readonly propose?: (
+    request: ActionRequest,
+    name: string,
+    input: unknown,
+  ) => Promise<PendingChangeReceipt>;
   readonly client?: (request: ActionRequest) => ActionClient | null;
 };
+
+/**
+ * `ActionRefusal`, with the fields this package hands a model: why the call
+ * was refused, whether trying again could work, and for an input the action
+ * refused, which fields. Never the input itself.
+ */
+export interface ActionRefusalFinding {
+  readonly reason: string;
+  readonly retry: string;
+  readonly details: Readonly<Record<string, readonly unknown[]>>;
+}
+
+/**
+ * The refusal an action call was answered with, or null for anything else.
+ * Read by its name, as `isActionRefusal` in the SDK reads it, for the reason
+ * `isRecordConflict` gives.
+ */
+export function actionRefusalOf(error: unknown): ActionRefusalFinding | null {
+  if (!(error instanceof Error) || error.name !== "ActionRefusal") {
+    return null;
+  }
+  const refusal = error as Error & {
+    reason?: unknown;
+    retry?: unknown;
+    details?: unknown;
+  };
+  if (typeof refusal.reason !== "string" || typeof refusal.retry !== "string") {
+    return null;
+  }
+  let details: Readonly<Record<string, readonly unknown[]>> = {};
+  if (typeof refusal.details === "function") {
+    try {
+      const read: unknown = (refusal.details as () => unknown).call(error);
+      if (typeof read === "object" && read !== null) {
+        details = read as Record<string, readonly unknown[]>;
+      }
+    } catch {
+      // A refusal whose details cannot be read is still a refusal.
+    }
+  }
+  return { reason: refusal.reason, retry: refusal.retry, details };
+}
 
 /** The host object, with the members above where the host has them. */
 export type AiPackageHost = Omit<PluginHost, "actions"> & {

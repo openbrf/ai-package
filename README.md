@@ -4,8 +4,11 @@ An [Open BRF](https://github.com/openbrf/openbrf) plugin that gives a housing
 cooperative's board assistants built on a language model, on the association's
 own model provider account and within a monthly limit the board sets.
 
-This release is the package's foundation: the settings, the way to the model,
-the licence check, and the limits. The assistants come in later releases.
+Its first assistant writes the association's news and pages from a prompt:
+the board member describes a change, the assistant drafts it, and nothing is
+written until the board member has read it in full and confirmed it. Under
+it are the settings, the way to the model, the licence check and the limits
+that every assistant shares.
 
 ## How it works
 
@@ -42,6 +45,89 @@ the licence check, and the limits. The assistants come in later releases.
   model Anthropic recommends for that kind of decline. Claude Haiku 5.5 has
   none. A request that is declined all the same comes back with the stop reason
   `refusal`.
+
+## The site and news assistant
+
+A board member opens the package's view, **AI assistant** in the board's
+section of the navigation (`/app/plugin/ai-package`), and describes what they
+want written or changed in the news or on the website's pages. The model
+reads what it needs and drafts the change with the news and page actions the
+instance offers an AI package (ADR 0038 in openbrf/openbrf, "News and pages on
+`ai`").
+
+- **Nothing is written before the person confirms.** The assistant proposes
+  every change through `host.actions.propose` and never through `invoke`.
+  Each one becomes a pending change (ADR 0039 in openbrf/openbrf), and the
+  view links to it on the platform's own pending changes screen, where the
+  board member reads it field by field and confirms or rejects it. The view
+  has no confirm button, and the package cannot confirm a change. The view
+  also always links that screen itself, so a reload or a new conversation
+  does not cut the way to changes still open. A pending change lapses after
+  a week.
+- **Mailings are a step of their own.** The assistant cannot mail the members.
+  If asked to, it proposes a mailing request (`news_request_mailing`), which
+  records the request once confirmed and sends nothing. A board member then
+  decides the mailing on the news screen.
+- **What the instance must offer.** The news and page actions on the `ai`
+  surface, which openbrf/openbrf#528 adds. On an instance without them the
+  host lists no tools to the assistant, which can then only answer in words.
+- **What it may reach.** The news and the pages: reading them, writing them,
+  publishing and unpublishing them, and who may read them. Not deleting
+  anything, the front page, the order of the pages or the menu: the instance
+  does not offer those to an AI package. The host lists the actions the
+  person may use, so the model is told of nothing they could not do
+  themselves, and the route requires `site:manage`, the board's own grant for
+  the news and the pages.
+- **No update over newer work.** A news update is proposed only with the
+  revision the model read, so one confirmed after somebody else saved the
+  item is refused rather than written over it. A page update needs the
+  revision anyway.
+- **Stored text is data.** The model is told that the text of news items and
+  pages is written by people and never instructions, and the tools'
+  descriptions say the same.
+- **What the audit log shows.** The proposal is recorded on the `ai` channel,
+  naming the package. The write, once confirmed, is the confirming person's
+  in the web interface, and its entry names the pending change.
+
+### One turn, run once
+
+The view gives every turn an id of its own, and sends a turn whose answer
+never arrived, or that is still running, again under the same id and with the
+time it first sent it. The first request with an id claims it in the
+package's records before the model is called, and a later one runs nothing: it
+is answered with the changes the turn proposed, told that the turn is still
+running, or, once the turn has finished or died and an hour has passed since
+it started, told that the turn is over. A turn first sent more
+than a week before, or dated more than a week ahead, is not run at all. So a
+retried turn proposes nothing twice, however late it is sent again, and within
+a turn a change the model asks for twice is proposed once.
+
+The request running a turn says in the record that it is alive before each
+call to the model and each change it proposes, and a turn counts as running
+for as long as it is heard from, however long that is. One not heard from in
+ten minutes died with its request: a later request finishes its record and is
+answered with what it had proposed, and the request, should it be only slow,
+finds the record finished and proposes nothing more.
+
+The record holds each pending change's id, action, address and expiry and,
+while the turn runs, when it was last heard from. It holds nothing anybody
+wrote: not the request, not the answer, not what a change would write, and not
+who asked. A turn still running keeps its record whatever its age. For a
+turn that has finished or died, the pending changes become eligible for removal
+an hour after it started, leaving only the time the turn started, and the
+record becomes eligible for deletion after two weeks: by then the route
+refuses every request that could carry its id. Both are done by a later
+request, which sweeps a few records each time, not by a timer, so a record can
+outlast these times; the answer "the turn is over" does not wait for the sweep.
+
+### What is sent to the model
+
+The conversation as the view keeps it, and what the actions return: the
+news and the pages, with an image's file id and alternative text but never
+the image. Each call says it carries names and free text, and names no
+person, because the package cannot tell whom a text is about (the plugin
+contract, "A request that carries personal data"). The view keeps the
+conversation; the package keeps none of it.
 
 ## Settings
 
@@ -112,12 +198,27 @@ kept. No licence verifies against it until Apteo's issuing key replaces it.
 
 The code is licensed under the [AGPL-3.0](LICENSE).
 
-## The status route
+## The routes
 
 `GET /api/plugin/ai-package/status` answers with the licence finding, the
 provider and model, whether a key is entered (never the key), this month's use
 and the two limits. It requires `association:read`, the board's reading of how
 the instance is configured, and refuses a connected app.
+
+`POST /api/plugin/ai-package/assistants/site/turns` takes one turn of the site
+and news assistant: `turnId`, a UUID the view mints, `sentAt`, the time the
+view first sent the turn as `Date.toISOString()` writes it, and `messages`, the
+conversation so far as alternating `{ role, text }` from the person and the
+assistant, ending with the person. It answers with the outcome, the model's
+answer and the pending changes the turn proposed. A turn arrives again under
+the same `turnId` and `sentAt` when its answer was lost, and runs once: a
+repeat is answered with the changes the turn proposed, `in-progress` while it
+runs, or `expired` once those changes are no longer kept, an hour on. A turn
+whose `sentAt` is more than a week from the server's time, before or after,
+runs not at all and is answered `expired`: it was first sent too long ago, or
+the clock of the device that sent it is off. It requires `site:manage`
+and refuses a connected app, whose token would put the turn's calls on `mcp`
+rather than `ai`.
 
 ## Development
 
@@ -128,13 +229,16 @@ pnpm typecheck
 pnpm build
 ```
 
-`pnpm test` runs the gateway against a fake provider and the Anthropic adapter
-against a stand-in for the host's way out, with the package's records in
-memory. It also loads the bundle the package ships into a NestJS application on
-Fastify and reads the status route.
+`pnpm test` runs the gateway and the assistant against a fake provider and a
+stand-in for `host.actions`, and the Anthropic adapter against a stand-in for
+the host's way out, with the package's records in memory. It loads the bundle
+the package ships into a NestJS application on Fastify and calls both routes,
+and renders the view in a DOM.
 
-The server entry point is one CommonJS bundle, `dist/server.cjs`, whose only
-externals are `@nestjs/common` and Node's built-ins. `pnpm check:package` runs
+`pnpm build` builds the view, a Module Federation remote at
+`dist/remoteEntry.js`, and then the server entry point, one CommonJS bundle,
+`dist/server.cjs`, whose only externals are `@nestjs/common` and Node's
+built-ins. `pnpm check:package` runs
 the SDK's `pluginPackageProblems` over the packed tarball, as the catalog does
 before it lists a release. With the SDK 1.0.0 it refuses this manifest, so run
 it as described below.
@@ -142,8 +246,9 @@ it as described below.
 ### Host members newer than the SDK release
 
 The package builds against `@openbrf/plugin-sdk` 1.0.0. `host.recipients`,
-`host.records`, `host.entitlements`, `host.actions.client` and the secret
-setting came later. `src/host-contract.ts` declares them as the SDK does, and
+`host.records`, `host.entitlements`, `host.actions.client`,
+`host.actions.propose`, the schemas `host.actions.list` hands over, the
+`ActionRefusal` a call is refused with and the secret setting came later. `src/host-contract.ts` declares them as the SDK does, and
 the package checks for each one at run time, because an older host does not
 have it. Replace those declarations with the SDK's own exports once a release
 carries them.
