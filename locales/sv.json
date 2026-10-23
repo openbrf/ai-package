@@ -34,7 +34,7 @@
     "entitlementRequired": "Installationen har ingen giltig licens för AI-paketet. Ange en på licenssidan.",
     "providerNotConfigured": "Ingen API-nyckel för Anthropic är angiven. Ange föreningens nyckel i AI-paketets inställningar.",
     "usageLimitReached": "Månadens gräns för AI-paketet är förbrukad. Assistenterna fungerar igen när nästa månad börjar, eller när gränsen höjs i inställningarna.",
-    "tooLittleLeft": "Det som återstår av månadens gräns för AI-paketet är mindre än vad en fråga får använda, {{budget}} token. Assistenten fungerar igen när nästa månad börjar, eller när gränsen höjs i inställningarna.",
+    "tooLittleLeft": "Det som återstår av månadens gräns för AI-paketet är mindre än vad en fråga får använda, {{budget}} token. Assistenten fungerar igen när nästa månad börjar bara om månadsgränsen är minst {{budget}} token. En lägre gräns måste höjas i inställningarna till minst det.",
     "rateLimited": "Assistenten får för många frågor just nu. Försök igen om en minut.",
     "providerFailed": "Språkmodellen gav inget svar just nu. Försök igen senare.",
     "documentsUnavailable": "Assistenten kan inte läsa dokumentarkivet på den här installationen.",

@@ -716,6 +716,57 @@ describe("the question's token budget", () => {
     expect(provider.calls).toHaveLength(2);
   });
 
+  it("dispatches no read of the call that crosses the budget", async () => {
+    const { assistant, provider, archive } = setup();
+    provider.answers.push(
+      costing(turn(use("document_list", {})), 40_000),
+      costing(turn(use("document_list", {})), 40_000),
+      costing(turn(use("document_list", {})), 40_000),
+      costing(turn(read(BYLAWS.id)), 140_000),
+    );
+
+    const refused = await refusal(
+      assistant.ask(REQUEST, QUESTION),
+      AssistantRefusal,
+    );
+
+    expect(refused.reason).toBe("no-answer");
+    expect(provider.calls).toHaveLength(4);
+    expect(archive.dispatched).toHaveLength(3);
+  });
+
+  it("gives no outcome from the call that crosses the budget", async () => {
+    const { assistant, provider } = setup();
+    provider.answers.push(
+      costing(turn(use("document_list", {})), 40_000),
+      costing(turn(use("document_list", {})), 40_000),
+      costing(turn(use("document_list", {})), 40_000),
+      costing(turn(use(NO_ANSWER_TOOL, { explanation: "Inget." })), 140_000),
+    );
+
+    const refused = await refusal(
+      assistant.ask(REQUEST, QUESTION),
+      AssistantRefusal,
+    );
+
+    expect(refused.reason).toBe("no-answer");
+  });
+
+  it("accepts an answer from a call that ends exactly on the budget", async () => {
+    const { assistant, provider } = setup();
+    provider.answers.push(
+      costing(turn(read(BYLAWS.id)), QUESTION_TOKEN_BUDGET * 0.4),
+      costing(
+        turn(give([{ documentId: BYLAWS.id, pages: [2] }])),
+        QUESTION_TOKEN_BUDGET * 0.6,
+      ),
+    );
+
+    const answer = await assistant.ask(REQUEST, QUESTION);
+
+    expect(answer.outcome).toBe("answered");
+  });
+
   it("refuses a question when less than its budget is left of the month, before anything is read", async () => {
     const { assistant, provider, archive } = setup({
       settings: { monthlyTokenLimit: QUESTION_TOKEN_BUDGET - 1 },

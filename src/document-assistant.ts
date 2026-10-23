@@ -305,6 +305,11 @@ export class DocumentAssistant {
       if (response.stop === "max-tokens") {
         throw new AssistantRefusal("no-answer");
       }
+      // A call that crossed the budget ends the question before its tools
+      // run: nothing it asks for would be used. Exactly the budget is allowed.
+      if (used > QUESTION_TOKEN_BUDGET) {
+        throw new AssistantRefusal("no-answer");
+      }
       messages.push(response.message);
 
       const uses = response.message.content.filter(

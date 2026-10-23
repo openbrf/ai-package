@@ -193,7 +193,7 @@ describe("the document assistant's route", () => {
       statusCode: 429,
       reason: "too-little-left",
       message:
-        "Less is left of this month's limit for the AI package than one question may use, 250,000 tokens. The assistant works again when the next month starts, or once the limit is raised in the settings.",
+        "Less is left of this month's limit for the AI package than one question may use, 250,000 tokens. The assistant works again when the next month starts only if the monthly limit is at least 250,000 tokens. A lower limit must be raised in the settings to at least that.",
     });
     expect(recipients.sent).toEqual([]);
   });
