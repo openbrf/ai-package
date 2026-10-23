@@ -78,14 +78,8 @@ describe("the status route", () => {
   });
 
   it.each([
-    [
-      "en-GB",
-      "A connected app cannot use the AI package. The board uses it on Open BRF's own screens.",
-    ],
-    [
-      "sv-SE",
-      "En ansluten app kan inte använda AI-paketet. Styrelsen använder det på Open BRF:s egna sidor.",
-    ],
+    ["en-GB", "A connected app cannot use the AI package."],
+    ["sv-SE", "En ansluten app kan inte använda AI-paketet."],
   ])(
     "refuses a connected app, which learns nothing about the licence or the use (%s)",
     async (language, message) => {
@@ -102,6 +96,16 @@ describe("the status route", () => {
       expect(text).not.toContain("Anthropic");
     },
   );
+
+  it("refuses every request on a host that cannot say whether a connected app sent it", async () => {
+    const response = await readStatus({ without: ["actions.client"] }, "en");
+
+    expect(response.status).toBe(501);
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({ reason: "host-unsupported" });
+    expect(text).not.toContain("active");
+    expect(text).not.toContain("Anthropic");
+  });
 
   it("asks the host for the board's reading of the configuration", async () => {
     const { host } = standIn();

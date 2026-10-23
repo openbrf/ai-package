@@ -156,17 +156,45 @@ describe("the document assistant's route", () => {
     expect(await english.json()).toEqual({
       statusCode: 403,
       reason: "connected-app",
-      message:
-        "A connected app cannot use the AI package. The board uses it on Open BRF's own screens.",
+      message: "A connected app cannot use the AI package.",
     });
     expect(swedish.status).toBe(403);
     expect(await swedish.json()).toEqual({
       statusCode: 403,
       reason: "connected-app",
-      message:
-        "En ansluten app kan inte använda AI-paketet. Styrelsen använder det på Open BRF:s egna sidor.",
+      message: "En ansluten app kan inte använda AI-paketet.",
     });
     expect(archive.listed).toEqual([]);
+    expect(recipients.sent).toEqual([]);
+  });
+
+  it("refuses every request on a host that cannot say whether a connected app sent it", async () => {
+    const { ask, recipients, archive } = await mount({
+      without: ["actions.client"],
+    });
+
+    const response = await ask({ question: "Vad står i stadgarna?" }, "en");
+
+    expect(response.status).toBe(501);
+    expect(await response.json()).toMatchObject({ reason: "host-unsupported" });
+    expect(archive.listed).toEqual([]);
+    expect(recipients.sent).toEqual([]);
+  });
+
+  it("refuses a question when less than its budget is left of the month", async () => {
+    const { ask, recipients } = await mount({
+      settings: { monthlyTokenLimit: 100_000 },
+    });
+
+    const response = await ask({ question: "Vad står i stadgarna?" }, "en");
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      statusCode: 429,
+      reason: "too-little-left",
+      message:
+        "Less is left of this month's limit for the AI package than one question may use, 250,000 tokens. The assistant works again when the next month starts only if the monthly limit is at least 250,000 tokens. A lower limit must be raised in the settings to at least that.",
+    });
     expect(recipients.sent).toEqual([]);
   });
 
