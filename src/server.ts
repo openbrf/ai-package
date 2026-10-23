@@ -22,6 +22,7 @@ import {
   type DocumentAnswer,
   DocumentAssistant,
   QUESTION_MAX_LENGTH,
+  QUESTION_TOKEN_BUDGET,
 } from "./document-assistant.ts";
 import { AiGateway, AiRefusal, type AiStatus } from "./gateway.ts";
 import type { AiPackageHost } from "./host-contract.ts";
@@ -76,10 +77,9 @@ export const createPlugin: PluginModuleFactory = (
       @Req() request: ActionRequest,
       @Headers("accept-language") acceptLanguage: string | undefined,
     ): Promise<AiStatus> {
-      // A host without `actions.client` cannot say who sent the request. The
-      // route is behind its session guard all the same.
-      if ((host.actions.client?.(request) ?? null) !== null) {
-        throw connectedAppRefused(languageOf(acceptLanguage));
+      const refused = callerRefusal(request, languageOf(acceptLanguage));
+      if (refused !== null) {
+        throw refused;
       }
       return gateway.status();
     }
@@ -106,8 +106,9 @@ export const createPlugin: PluginModuleFactory = (
       @Headers("accept-language") acceptLanguage: string | undefined,
     ): Promise<DocumentAnswer> {
       const language = languageOf(acceptLanguage);
-      if ((host.actions.client?.(request) ?? null) !== null) {
-        throw connectedAppRefused(language);
+      const refused = callerRefusal(request, language);
+      if (refused !== null) {
+        throw refused;
       }
       const question = questionOf(body);
       if (question === null) {
@@ -121,6 +122,23 @@ export const createPlugin: PluginModuleFactory = (
         throw refusalFor(language, error);
       }
     }
+  }
+
+  /**
+   * The refusal of a request neither route serves, or null. A host without
+   * `actions.client` cannot say whether a connected app sent the request, so
+   * it is answered as a host older than the package, before anything is read.
+   */
+  function callerRefusal(
+    request: ActionRequest,
+    language: Language,
+  ): HttpException | null {
+    if (host.actions.client === undefined) {
+      return refusal(language, 501, "host-unsupported", "hostUnsupported");
+    }
+    return host.actions.client(request) === null
+      ? null
+      : refusal(language, 403, "connected-app", "connectedApp");
   }
 
   @Module({})
@@ -153,11 +171,6 @@ export function questionOf(body: unknown): string | null {
     return null;
   }
   return trimmed;
-}
-
-/** The refusal of a connected app, which neither route serves. */
-function connectedAppRefused(language: Language): HttpException {
-  return refusal(language, 403, "connected-app", "connectedApp");
 }
 
 /** The answer an error gives the board member, in their language. */
@@ -193,6 +206,10 @@ function refusalFor(language: Language, error: unknown): unknown {
     switch (error.reason) {
       case "documents-unavailable":
         return refusal(language, 503, error.reason, "documentsUnavailable");
+      case "too-little-left":
+        return refusal(language, 429, error.reason, "tooLittleLeft", {
+          budget: new Intl.NumberFormat(language).format(QUESTION_TOKEN_BUDGET),
+        });
       case "model-declined":
         return refusal(language, 422, error.reason, "modelDeclined");
       case "no-answer":

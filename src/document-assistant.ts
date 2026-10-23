@@ -7,11 +7,12 @@ import {
   type ListedAction,
   type PersonalDataCategory,
 } from "./host-contract.ts";
-import type {
-  ModelMessage,
-  ModelTool,
-  ModelToolResult,
-  ModelToolUse,
+import {
+  type ModelMessage,
+  type ModelTool,
+  type ModelToolResult,
+  type ModelToolUse,
+  totalTokens,
 } from "./provider.ts";
 
 /**
@@ -34,6 +35,9 @@ import type {
  * answer never reaches the board member without a source the model was given.
  * The titles in the answer are the archive's, never the model's.
  *
+ * A question has a budget of tokens, counted as the monthly limit counts
+ * them, and is not asked when less than that is left of the month.
+ *
  * Nothing is kept: not the question, not what was read, not the answer.
  */
 
@@ -50,12 +54,28 @@ export const MAX_MODEL_CALLS = 10;
 export const MAX_TOOL_CALLS_PER_TURN = 6;
 
 /**
- * The most document text one question reads, in characters: about 75,000
- * tokens, five calls of `document_get` at its most. Each call to the model
- * sends what was read again, so this is what bounds a question's cost. A read
- * that would pass it is cut short where it does.
+ * The most tokens one question uses, counted as the monthly limit counts
+ * them: what each call sends, including what it reads from the provider's
+ * cache, and what it gets back.
+ *
+ * Each call sends the conversation so far again, so a call is about as large
+ * as the one before it, and larger by what was read in between. A call after
+ * which another as large would pass the budget is the question's last, and
+ * the model is told to finish in it; one that the budget is used up before
+ * is not made. So a question passes the budget only when its calls grow from
+ * one to the next, and then by less than its last call, whose size the share
+ * of text below and the calls' answers bound.
  */
-export const MAX_CHARACTERS_READ = 300_000;
+export const QUESTION_TOKEN_BUDGET = 250_000;
+
+/**
+ * The most document text one question reads, in characters: about 40,000
+ * tokens, two and a half calls of `document_get` at its most, so that a
+ * conversation that has read it all still has room for several calls within
+ * the question's budget. A read that would pass it is cut short where it
+ * does.
+ */
+export const MAX_CHARACTERS_READ = 150_000;
 
 /** The most sources one answer names. */
 export const MAX_SOURCES = 10;
@@ -100,13 +120,16 @@ export type DocumentAnswer =
  * - `documents-unavailable`: the host offers this person no document reads on
  *   the `ai` surface, or lists them without their schemas, which is an
  *   instance older than the package.
+ * - `too-little-left`: less is left of this month's limit than one question
+ *   may use, `QUESTION_TOKEN_BUDGET`. When nothing is left, the gateway's
+ *   `usage-limit-reached` says so instead.
  * - `model-declined`: the model declined the question.
  * - `no-answer`: the model gave no answer the assistant could check: it
  *   stopped without one, ran out of room, or did not finish within the calls
- *   one question may make.
+ *   or the tokens one question may use.
  */
 export type AssistantRefusalReason =
-  "documents-unavailable" | "model-declined" | "no-answer";
+  "documents-unavailable" | "too-little-left" | "model-declined" | "no-answer";
 
 export class AssistantRefusal extends Error {
   constructor(readonly reason: AssistantRefusalReason) {
@@ -137,6 +160,9 @@ Write in the language the question is written in. Be brief and concrete: give th
 
 /** Sent once when the model stops without either of the tools above. */
 const FINISH_WITH_A_TOOL = `Finish by calling ${ANSWER_TOOL} or ${NO_ANSWER_TOOL}. An answer in plain text does not reach the board member.`;
+
+/** Sent with the last call one question may make. */
+export const LAST_CALL = `This is the last turn this question may take. Finish now by calling ${ANSWER_TOOL} or ${NO_ANSWER_TOOL}, from what document_get has already returned to you. A read you ask for now is not answered.`;
 
 const FINISHING_TOOLS: readonly ModelTool[] = [
   {
@@ -224,6 +250,9 @@ export class DocumentAssistant {
    */
   async ask(request: ActionRequest, question: string): Promise<DocumentAnswer> {
     const actions = await this.documentActions(request);
+    if ((await this.gateway.tokensLeft()) < QUESTION_TOKEN_BUDGET) {
+      throw new AssistantRefusal("too-little-left");
+    }
     const tools: ModelTool[] = [
       ...DOCUMENT_ACTIONS.map((name) => {
         const action = actions.get(name) as ListedAction;
@@ -239,8 +268,21 @@ export class DocumentAssistant {
     const session = new Session(this.host, request, actions);
     const messages: ModelMessage[] = [{ role: "user", content: question }];
     let reminded = false;
+    // What the question has used, and its previous call.
+    let used = 0;
+    let previous = 0;
 
     for (let call = 0; call < MAX_MODEL_CALLS; call++) {
+      if (used >= QUESTION_TOKEN_BUDGET) {
+        throw new AssistantRefusal("no-answer");
+      }
+      // The next call is about as large as the previous one, or larger.
+      const last =
+        call === MAX_MODEL_CALLS - 1 ||
+        used + 2 * previous > QUESTION_TOKEN_BUDGET;
+      if (last && call > 0) {
+        messages.push(withText(messages.pop() as ModelMessage, LAST_CALL));
+      }
       const response = await this.gateway.complete(
         {
           system: SYSTEM_PROMPT,
@@ -255,6 +297,8 @@ export class DocumentAssistant {
         // So the categories are said, and no subject (ADR 0037).
         { personalData: session.categories(), subjects: [] },
       );
+      previous = totalTokens(response.usage);
+      used += previous;
       if (response.stop === "refusal") {
         throw new AssistantRefusal("model-declined");
       }
@@ -267,7 +311,7 @@ export class DocumentAssistant {
         (block): block is ModelToolUse => block.type === "tool_use",
       );
       if (uses.length === 0) {
-        if (reminded) {
+        if (reminded || last) {
           throw new AssistantRefusal("no-answer");
         }
         reminded = true;
@@ -275,10 +319,13 @@ export class DocumentAssistant {
         continue;
       }
 
-      const results = await session.answer(uses);
+      const results = await session.answer(uses, last);
       const finished = results.find((outcome) => outcome.kind === "finished");
       if (finished !== undefined) {
         return finished.answer;
+      }
+      if (last) {
+        throw new AssistantRefusal("no-answer");
       }
       messages.push({
         role: "user",
@@ -346,9 +393,13 @@ class Session {
    * turn reads reaches the model only with the reply to it, so the model has
    * not seen it and may not cite it yet. An answer that stands ends the
    * question, and the turn's reads are not dispatched. Otherwise the reads
-   * run, one at a time, and go back to the model with the refused answer.
+   * run, one at a time, and go back to the model with the refused answer,
+   * unless this was the question's last turn, which nothing goes back to.
    */
-  async answer(uses: readonly ModelToolUse[]): Promise<Outcome[]> {
+  async answer(
+    uses: readonly ModelToolUse[],
+    last: boolean,
+  ): Promise<Outcome[]> {
     const outcomes = uses.map((use, index): Outcome | undefined => {
       if (index >= MAX_TOOL_CALLS_PER_TURN) {
         return refused(
@@ -370,6 +421,9 @@ class Session {
     const finished = outcomes.find((outcome) => outcome?.kind === "finished");
     if (finished !== undefined) {
       return [finished];
+    }
+    if (last) {
+      return [];
     }
     for (const [index, use] of uses.entries()) {
       outcomes[index] ??= await this.dispatch(use);
@@ -595,6 +649,16 @@ class Session {
       },
     };
   }
+}
+
+/** A message of the package's own, with a sentence added at its end. */
+function withText(message: ModelMessage, text: string): ModelMessage {
+  if (message.role !== "user") {
+    return message;
+  }
+  return typeof message.content === "string"
+    ? { role: "user", content: `${message.content}\n\n${text}` }
+    : { role: "user", content: [...message.content, { type: "text", text }] };
 }
 
 function refused(use: ModelToolUse, why: string): Outcome {

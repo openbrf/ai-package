@@ -4,18 +4,21 @@ import {
   ANSWER_TOOL,
   AssistantRefusal,
   DocumentAssistant,
+  LAST_CALL,
   MAX_CHARACTERS_READ,
   MAX_MODEL_CALLS,
   MAX_TOOL_CALLS_PER_TURN,
   NO_ANSWER_TOOL,
+  QUESTION_TOKEN_BUDGET,
   SYSTEM_PROMPT,
 } from "../src/document-assistant.ts";
 import { AiGateway, AiRefusal } from "../src/gateway.ts";
-import type {
-  ModelAssistantMessage,
-  ModelResponse,
-  ModelToolResult,
-  ModelUserMessage,
+import {
+  type ModelAssistantMessage,
+  type ModelResponse,
+  type ModelToolResult,
+  type ModelUserMessage,
+  totalTokens,
 } from "../src/provider.ts";
 import {
   ActionRefusalStandIn,
@@ -95,6 +98,24 @@ function turn(...content: ModelAssistantMessage["content"]): ModelResponse {
     },
     model: "fake-model",
   };
+}
+
+/** A turn that used `tokens` in all, as the monthly limit counts them. */
+function costing(response: ModelResponse, tokens: number): ModelResponse {
+  return {
+    ...response,
+    usage: {
+      ...response.usage,
+      inputTokens: tokens - response.usage.outputTokens,
+    },
+  };
+}
+
+/** What the calls the provider answered used, as the limit counts it. */
+function used(provider: FakeProvider, answered: readonly ModelResponse[]) {
+  return answered
+    .slice(0, provider.calls.length)
+    .reduce((total, response) => total + totalTokens(response.usage), 0);
 }
 
 type ToolUse = ReturnType<typeof use>;
@@ -581,7 +602,7 @@ describe("a model that does not finish", () => {
   });
 
   it("stops after the calls one question may make, however it goes on reading", async () => {
-    const { assistant, provider } = setup();
+    const { assistant, provider, archive } = setup();
     for (let call = 0; call < MAX_MODEL_CALLS + 2; call++) {
       provider.answers.push(turn(use("document_list", {})));
     }
@@ -593,6 +614,143 @@ describe("a model that does not finish", () => {
 
     expect(refused.reason).toBe("no-answer");
     expect(provider.calls).toHaveLength(MAX_MODEL_CALLS);
+    // The last call says it is, and the reads asked for in it are not made.
+    expect(
+      provider.calls.at(-1)?.request.messages.at(-1)?.content,
+    ).toContainEqual({ type: "text", text: LAST_CALL });
+    expect(
+      provider.calls
+        .slice(0, -1)
+        .map((call) => JSON.stringify(call.request.messages)),
+    ).not.toContainEqual(expect.stringContaining(LAST_CALL));
+    expect(archive.dispatched).toHaveLength(MAX_MODEL_CALLS - 1);
+  });
+});
+
+describe("the question's token budget", () => {
+  it("stops at the budget, after a last call the model is told to finish in", async () => {
+    const { assistant, provider, archive } = setup();
+    // Two calls as large as the first would pass the budget after it.
+    const answered = Array.from({ length: MAX_MODEL_CALLS }, () =>
+      costing(turn(use("document_list", {})), QUESTION_TOKEN_BUDGET * 0.4),
+    );
+    provider.answers.push(...answered);
+
+    const refused = await refusal(
+      assistant.ask(REQUEST, QUESTION),
+      AssistantRefusal,
+    );
+
+    expect(refused.reason).toBe("no-answer");
+    expect(provider.calls).toHaveLength(2);
+    expect(provider.calls[1]?.request.messages.at(-1)?.content).toContainEqual({
+      type: "text",
+      text: LAST_CALL,
+    });
+    expect(archive.dispatched).toHaveLength(1);
+    expect(used(provider, answered)).toBeLessThanOrEqual(QUESTION_TOKEN_BUDGET);
+  });
+
+  it("goes on while another call as large fits, and never passes the budget when the calls do not grow", async () => {
+    const { assistant, provider } = setup();
+    const answered = Array.from({ length: MAX_MODEL_CALLS }, () =>
+      costing(turn(use("document_list", {})), QUESTION_TOKEN_BUDGET * 0.2),
+    );
+    provider.answers.push(...answered);
+
+    await refusal(assistant.ask(REQUEST, QUESTION), AssistantRefusal);
+
+    // After four calls a fifth as large still fits, and a sixth would not.
+    expect(provider.calls).toHaveLength(5);
+    expect(used(provider, answered)).toBe(QUESTION_TOKEN_BUDGET);
+  });
+
+  it("answers in the last call", async () => {
+    const { assistant, provider } = setup();
+    provider.answers.push(
+      costing(turn(read(BYLAWS.id)), QUESTION_TOKEN_BUDGET * 0.4),
+      turn(give([{ documentId: BYLAWS.id, pages: [2] }])),
+    );
+
+    const answer = await assistant.ask(REQUEST, QUESTION);
+
+    expect(answer.outcome).toBe("answered");
+    // After the read's output, as the last thing the model is told.
+    const content = provider.calls[1]?.request.messages.at(-1)?.content;
+    expect(
+      Array.isArray(content) && content.map((block) => block.type),
+    ).toEqual(["tool_result", "text"]);
+  });
+
+  it("tells a model reminded to finish in its last call both", async () => {
+    const { assistant, provider } = setup();
+    provider.answers.push(
+      costing(
+        turn({ type: "text", text: "Sju ledamöter." }),
+        QUESTION_TOKEN_BUDGET * 0.4,
+      ),
+      turn(use(NO_ANSWER_TOOL, { explanation: "Inget." })),
+    );
+
+    await assistant.ask(REQUEST, QUESTION);
+
+    const reminder = provider.calls[1]?.request.messages.at(-1)?.content;
+    expect(reminder).toEqual(expect.stringContaining(ANSWER_TOOL));
+    expect(reminder).toEqual(expect.stringContaining(LAST_CALL));
+  });
+
+  it("makes no call once a call has used up the budget", async () => {
+    const { assistant, provider } = setup();
+    provider.answers.push(
+      turn(use("document_list", {})),
+      costing(turn(use("document_list", {})), QUESTION_TOKEN_BUDGET),
+      turn(use(NO_ANSWER_TOOL, { explanation: "Inget." })),
+    );
+
+    const refused = await refusal(
+      assistant.ask(REQUEST, QUESTION),
+      AssistantRefusal,
+    );
+
+    expect(refused.reason).toBe("no-answer");
+    expect(provider.calls).toHaveLength(2);
+  });
+
+  it("refuses a question when less than its budget is left of the month, before anything is read", async () => {
+    const { assistant, provider, archive } = setup({
+      settings: { monthlyTokenLimit: QUESTION_TOKEN_BUDGET - 1 },
+    });
+
+    const refused = await refusal(
+      assistant.ask(REQUEST, QUESTION),
+      AssistantRefusal,
+    );
+
+    expect(refused.reason).toBe("too-little-left");
+    expect(provider.calls).toEqual([]);
+    expect(archive.dispatched).toEqual([]);
+  });
+
+  it("asks a question with its budget left of the month", async () => {
+    const { assistant, provider } = setup({
+      settings: { monthlyTokenLimit: QUESTION_TOKEN_BUDGET },
+    });
+    provider.answers.push(turn(use(NO_ANSWER_TOOL, { explanation: "Inget." })));
+
+    expect((await assistant.ask(REQUEST, QUESTION)).outcome).toBe(
+      "not-in-documents",
+    );
+  });
+
+  it("leaves a month with nothing left to the gateway's refusal", async () => {
+    const { assistant, provider } = setup({
+      settings: { monthlyTokenLimit: 0 },
+    });
+
+    const refused = await refusal(assistant.ask(REQUEST, QUESTION), AiRefusal);
+
+    expect(refused.reason).toBe("usage-limit-reached");
+    expect(provider.calls).toEqual([]);
   });
 });
 
@@ -647,15 +805,15 @@ describe("what one question may spend", () => {
   });
 
   it("cuts a read short where the question's share runs out, and lets only what was sent be cited", async () => {
-    // Every page 20,000 characters but the fifteenth, one short: five reads
-    // of three pages come to 299,999 characters, one below the share.
+    // Every page 10,000 characters but the fifteenth, one short: five reads
+    // of three pages come to 149,999 characters, one below the share.
     const long: StandInDocument = {
       id: "doc-long",
       title: "Underhållsplan",
       category: "Underhåll",
       audience: "MEMBER",
       pages: Array.from({ length: 30 }, (_, index) =>
-        "x".repeat(index === 14 ? 19_999 : 20_000),
+        "x".repeat(index === 14 ? 9_999 : 10_000),
       ),
     };
     const { assistant, provider } = setup({ documents: [long] });
@@ -700,7 +858,7 @@ describe("what one question may spend", () => {
       category: "Underhåll",
       audience: "MEMBER",
       pages: Array.from({ length: 30 }, (_, index) =>
-        "x".repeat(index === 14 ? 19_999 : 20_000),
+        "x".repeat(index === 14 ? 9_999 : 10_000),
       ),
     };
     const { assistant, provider } = setup({ documents: [long] });

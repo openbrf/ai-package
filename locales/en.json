@@ -29,11 +29,12 @@
   },
   "refusals": {
     "questionInvalid": "Write a question of at most {{max}} characters.",
-    "connectedApp": "A connected app cannot use the AI package. The board uses it on Open BRF's own screens.",
+    "connectedApp": "A connected app cannot use the AI package.",
     "hostUnsupported": "This instance of Open BRF is older than the AI package. Update it to use the assistants.",
     "entitlementRequired": "The instance holds no active licence for the AI package. Enter one on the licence screen.",
     "providerNotConfigured": "No Anthropic API key is entered. Enter the association's key in the AI package's settings.",
     "usageLimitReached": "This month's limit for the AI package is used up. The assistants work again when the next month starts, or once the limit is raised in the settings.",
+    "tooLittleLeft": "Less is left of this month's limit for the AI package than one question may use, {{budget}} tokens. The assistant works again when the next month starts, or once the limit is raised in the settings.",
     "rateLimited": "The assistant is getting too many questions just now. Try again in a minute.",
     "providerFailed": "The language model gave no answer just now. Try again later.",
     "documentsUnavailable": "The assistant cannot read the document archive on this instance.",

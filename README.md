@@ -78,17 +78,30 @@ documents it read, instead of answering.
   descriptions say the same. The only tools are reads and the two that end
   the question, so nothing a document says can make the assistant change
   anything.
-- **Bounded per question.** At most 10 calls to the model, 6 tool calls
-  answered in one turn, and 300,000 characters of document text read: about
-  75,000 tokens, since every call sends what was read again. A read that would
-  pass that share is cut short where it does, and says where its text goes
-  on; what is cut off is not sent and cannot be cited. Each request asks
-  the provider to cache the conversation so far, so a later call of the same
-  question can read what an earlier one sent at the cache's lower rate; a
-  conversation shorter than the provider's smallest cacheable length is not
-  cached. Each call counts against the monthly limit and the per-minute limit
-  like any other, and the monthly limit counts tokens read from the cache as
-  it counts any other.
+- **Bounded per question.** A question has a budget of 250,000 tokens,
+  counted as the monthly limit counts them. It is not asked when less than
+  that is left of the month, and is refused with `too-little-left` before
+  anything is read. Every call sends the conversation so far again, so each
+  is about as large as the one before it, and larger by what was read in
+  between. A call after which another as large would pass the budget is the
+  question's last, and the model is told to finish in it; once the budget is
+  used up, no call is made. A question can therefore pass its budget only
+  when its calls grow from one to the next, and then by less than its last
+  call.
+- **And within the budget.** At most 10 calls to the model, the last of them
+  told so, 6 tool calls answered in one turn, and 150,000 characters of
+  document text read, about 40,000 tokens. A read that would pass that share
+  is cut short where it does, and says where its text goes on; what is cut
+  off is not sent and cannot be cited. A read the model asks for in its last
+  call is not made. Each request asks the provider to cache the conversation
+  so far, so a later call of the same question can read what an earlier one
+  sent at the cache's lower rate; a conversation shorter than the provider's
+  smallest cacheable length is not cached. Each call counts against the
+  monthly limit and the per-minute limit like any other, and the monthly
+  limit counts tokens read from the cache as it counts any other. Questions
+  asked at once by several board members can each start with the budget
+  left, so together they can pass the monthly limit by what they use; the
+  per-minute limit bounds how fast.
 - **Scanned documents are not read.** A PDF without a text layer is a set of
   pictures, and the core reads no pictures. The assistant says so when such a
   document is the one the question is about.
@@ -101,7 +114,9 @@ documents it read, instead of answering.
 most 2,000 characters. It requires `documents:manage`, the board's, because
 every question is paid for on the association's key. A connected app is
 refused: it has a model of its own and reaches the same reads through the MCP
-Connector.
+Connector. A host without `host.actions.client` cannot say whether a connected
+app sent a request, so the route refuses every request there with `501` and
+`host-unsupported`, before anything is read.
 
 It answers `200` with one of:
 
@@ -141,14 +156,20 @@ language the request asks for (Swedish unless English):
 | 403    | `entitlement-required`    | No active licence for the AI package.                                                      |
 | 422    | `model-declined`          | The model declined the question.                                                           |
 | 429    | `usage-limit-reached`     | This month's limit is used up.                                                             |
+| 429    | `too-little-left`         | Less is left of this month's limit than one question may use, 250,000 tokens.              |
 | 429    | `rate-limited`            | Too many calls this minute, here or at the provider; `retryAfterSeconds` when anyone said. |
-| 501    | `host-unsupported`        | The instance is older than the package.                                                    |
+| 501    | `host-unsupported`        | The instance is older than the package, or has no `host.actions.client`.                   |
 | 502    | `provider-failed`         | The provider gave no answer.                                                               |
-| 502    | `no-answer`               | The model gave no answer the assistant could check within its calls.                       |
+| 502    | `no-answer`               | The model gave no answer the assistant could check within its calls and its budget.        |
 | 503    | `provider-not-configured` | No API key is entered.                                                                     |
 | 503    | `documents-unavailable`   | The host offers this person no document reads on the `ai` surface.                         |
 
-The package has no screen of its own yet. The route is what one calls.
+The package has no screen of its own yet. The route is what one calls. A
+screen that shows its answers shows `answer`, `explanation` and the sources'
+titles as plain text: no Markdown, no HTML, and no links made from addresses
+in the text. A document can steer what the model writes, and the package
+checks that the cited pages were read, not that an address in the answer is
+on them.
 
 ## Settings
 
@@ -236,7 +257,8 @@ The code is licensed under the [AGPL-3.0](LICENSE).
 provider and model, whether a key is entered (never the key), this month's use
 and the two limits. It requires `association:read`, the board's reading of how
 the instance is configured, and refuses a connected app with `403` and the
-reason `connected-app`, as the document assistant's route does.
+reason `connected-app`, as the document assistant's route does. On a host
+without `host.actions.client` it answers `501` with `host-unsupported`.
 
 ## Development
 

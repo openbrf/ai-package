@@ -232,7 +232,9 @@ export interface StandIn {
 
 export interface StandInOptions {
   /** Leave out a member, as an older host does. */
-  without?: readonly ("recipients" | "records" | "entitlements")[];
+  without?: readonly (
+    "recipients" | "records" | "entitlements" | "actions.client"
+  )[];
   settings?: Record<string, unknown>;
   entitlement?: EntitlementState;
   /** Whether `actions.client` names a connected app for every request. */
@@ -275,10 +277,14 @@ export function standIn(options: StandInOptions = {}): StandIn {
       list: async () => [],
       invoke: async () => undefined,
       ...options.actions,
-      client: () =>
-        options.connectedApp === true
-          ? { clientId: "client-1", clientHost: "client.example" }
-          : null,
+      ...(without.has("actions.client")
+        ? {}
+        : {
+            client: () =>
+              options.connectedApp === true
+                ? { clientId: "client-1", clientHost: "client.example" }
+                : null,
+          }),
     },
     ...(without.has("recipients") ? {} : { recipients }),
     ...(without.has("records") ? {} : { records }),
