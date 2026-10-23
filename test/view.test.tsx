@@ -59,6 +59,7 @@ const PROPOSED: SiteTurnResponse = {
 
 interface Sent {
   turnId: string;
+  sentAt: string;
   messages: { role: string; text: string }[];
 }
 
@@ -131,6 +132,9 @@ describe("the assistant's view", () => {
         turnId: expect.stringMatching(
           /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
         ),
+        sentAt: expect.stringMatching(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+        ),
         messages: [{ role: "user", text: "Skriv en nyhet om städdagen." }],
       },
     ]);
@@ -190,6 +194,58 @@ describe("the assistant's view", () => {
     expect(sent[1]).toEqual(sent[0]);
     // The failure is gone with its cause.
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers a turn that is still running again, and shows what it proposed once it has finished", async () => {
+    const { sent } = serve(
+      new TypeError("Failed to fetch"),
+      { outcome: "in-progress" },
+      {
+        outcome: "repeated",
+        proposals: PROPOSED.outcome === "answered" ? PROPOSED.proposals : [],
+      },
+    );
+    show();
+
+    ask("Skriv en nyhet om städdagen.");
+    fireEvent.click(await screen.findByRole("button", { name: "Försök igen" }));
+    expect(
+      await screen.findByText(
+        "Assistenten arbetar fortfarande med den här frågan. Försök igen om en stund, så visas det den har lagt fram.",
+      ),
+    ).toBeTruthy();
+    // Not an answer: the conversation holds the question alone, and nothing
+    // else can be sent until the turn is over.
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(
+      (screen.getByRole("button", { name: "Skicka" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+
+    const link = await screen.findByRole("link", {
+      name: "Läs och bekräfta: Skapa en nyhet",
+    });
+    expect(link.getAttribute("href")).toBe("/app/pending-changes/change-1");
+    expect(sent).toHaveLength(3);
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[2]).toEqual(sent[0]);
+    expect(screen.queryByText(/arbetar fortfarande/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull();
+  });
+
+  it("says a turn sent too long ago is over, and takes the next question", async () => {
+    serve({ outcome: "expired" });
+    show();
+
+    ask("Skriv en nyhet om städdagen.");
+
+    expect(
+      await screen.findByText(
+        "Frågan skickades för länge sedan för att kunna besvaras igen. Ändringar den lade fram finns under Väntande ändringar.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull();
   });
 
   it("carries the conversation on, leaving out a turn that got no words", async () => {

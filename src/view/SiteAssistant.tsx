@@ -33,8 +33,9 @@ import { NAMESPACE, styles } from "./styles.ts";
  * rejects it: this view confirms nothing and has no button that could.
  *
  * One turn at a time. A turn that got no answer, because the connection
- * failed, is sent again under the same id, so the route runs it once
- * however many times it arrives.
+ * failed or the turn is still running, is sent again under the same id and
+ * with the time it was first sent, so the route runs it once however many
+ * times it arrives, and tells what it proposed once it has finished.
  */
 
 const ROUTE = "/api/plugin/ai-package/assistants/site/turns";
@@ -45,7 +46,7 @@ type Notice =
   | "outcome.declined"
   | "outcome.failed"
   | "outcome.repeated"
-  | "outcome.inProgress"
+  | "outcome.expired"
   | `refused.${string}`;
 
 type Entry =
@@ -61,13 +62,22 @@ type Entry =
 /** A turn on its way, or one that got no answer and can be sent again. */
 interface Turn {
   readonly turnId: string;
+  /** When it was first sent, as an ISO time. */
+  readonly sentAt: string;
   readonly text: string;
 }
 
-type Failure = "send" | "forbidden";
+/**
+ * Why the last turn has no reply to show. A turn that is still running is
+ * not over: it is offered again, like one whose answer was lost.
+ */
+type Unanswered = "error.send" | "error.forbidden" | "outcome.inProgress";
 
-/** The reply an answer from the route is shown as. */
-function replyOf(response: SiteTurnResponse, key: string): Entry {
+/** The reply an answer from the route is shown as, once the turn is over. */
+function replyOf(
+  response: Exclude<SiteTurnResponse, { outcome: "in-progress" }>,
+  key: string,
+): Entry {
   const reply = (
     text: string | null,
     notice: Notice | null,
@@ -92,8 +102,8 @@ function replyOf(response: SiteTurnResponse, key: string): Entry {
       return reply(null, `refused.${response.reason}`, response.proposals);
     case "repeated":
       return reply(null, "outcome.repeated", response.proposals);
-    case "in-progress":
-      return reply(null, "outcome.inProgress");
+    case "expired":
+      return reply(null, "outcome.expired");
     case "host-unsupported":
       return reply(null, "refused.host-unsupported");
   }
@@ -205,7 +215,7 @@ export default function SiteAssistant(): ReactElement {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState<Turn | null>(null);
   const [unsent, setUnsent] = useState<Turn | null>(null);
-  const [failure, setFailure] = useState<Failure | null>(null);
+  const [unanswered, setUnanswered] = useState<Unanswered | null>(null);
   const mounted = useRef(true);
   const keys = useRef(0);
 
@@ -224,7 +234,7 @@ export default function SiteAssistant(): ReactElement {
   const send = async (turn: Turn, history: readonly Entry[]): Promise<void> => {
     setSending(turn);
     setUnsent(null);
-    setFailure(null);
+    setUnanswered(null);
     let response: Response;
     try {
       response = await fetch(ROUTE, {
@@ -236,6 +246,7 @@ export default function SiteAssistant(): ReactElement {
         },
         body: JSON.stringify({
           turnId: turn.turnId,
+          sentAt: turn.sentAt,
           messages: conversationFor(history, turn.text),
         }),
       });
@@ -243,7 +254,7 @@ export default function SiteAssistant(): ReactElement {
       if (mounted.current) {
         setSending(null);
         setUnsent(turn);
-        setFailure("send");
+        setUnanswered("error.send");
       }
       return;
     }
@@ -252,7 +263,7 @@ export default function SiteAssistant(): ReactElement {
     }
     if (response.status === 403) {
       setSending(null);
-      setFailure("forbidden");
+      setUnanswered("error.forbidden");
       return;
     }
     let answer: SiteTurnResponse;
@@ -267,7 +278,7 @@ export default function SiteAssistant(): ReactElement {
       if (mounted.current) {
         setSending(null);
         setUnsent(turn);
-        setFailure("send");
+        setUnanswered("error.send");
       }
       return;
     }
@@ -275,6 +286,13 @@ export default function SiteAssistant(): ReactElement {
       return;
     }
     setSending(null);
+    if (answer.outcome === "in-progress") {
+      // The turn runs on: offered again under the same id, it is answered
+      // with what it proposed once it has finished.
+      setUnsent(turn);
+      setUnanswered("outcome.inProgress");
+      return;
+    }
     setEntries((current) => [...current, replyOf(answer, nextKey())]);
   };
 
@@ -287,7 +305,14 @@ export default function SiteAssistant(): ReactElement {
     const history = entries;
     setEntries([...history, { kind: "person", key: nextKey(), text }]);
     setDraft("");
-    void send({ turnId: crypto.randomUUID(), text }, history);
+    void send(
+      {
+        turnId: crypto.randomUUID(),
+        sentAt: new Date().toISOString(),
+        text,
+      },
+      history,
+    );
   };
 
   const retry = (): void => {
@@ -306,7 +331,7 @@ export default function SiteAssistant(): ReactElement {
     setEntries([]);
     setDraft("");
     setUnsent(null);
-    setFailure(null);
+    setUnanswered(null);
   };
 
   const busy = sending !== null;
@@ -331,11 +356,17 @@ export default function SiteAssistant(): ReactElement {
         </p>
       ) : null}
 
-      {failure === null ? null : (
+      {unanswered === null ? null : (
         <div style={styles.toolbar}>
-          <p role="alert" style={styles.failed}>
-            {t(`site.error.${failure}`)}
-          </p>
+          {unanswered === "outcome.inProgress" ? (
+            <p role="status" style={styles.notice}>
+              {t(`site.${unanswered}`)}
+            </p>
+          ) : (
+            <p role="alert" style={styles.failed}>
+              {t(`site.${unanswered}`)}
+            </p>
+          )}
           {unsent === null ? null : (
             <button
               type="button"

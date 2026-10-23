@@ -89,6 +89,7 @@ function post(url: string, body: unknown): Promise<Response> {
 
 const TURN = {
   turnId: TURN_ID,
+  sentAt: new Date().toISOString(),
   messages: [{ role: "user", text: "Skriv en nyhet om städdagen." }],
 };
 
@@ -154,11 +155,19 @@ describe("the site assistant's route", () => {
   it.each([
     ["no turn id", { messages: TURN.messages }],
     ["a turn id that is not one", { ...TURN, turnId: "turn-1" }],
-    ["no conversation", { turnId: TURN_ID }],
+    ["no time it was first sent", { turnId: TURN_ID, messages: TURN.messages }],
+    ["a time that is not one", { ...TURN, sentAt: "2026-10-22" }],
+    ["a time that is no date", { ...TURN, sentAt: "2026-02-30T09:41:12.000Z" }],
+    [
+      "a time without milliseconds",
+      { ...TURN, sentAt: "2026-10-22T09:41:12Z" },
+    ],
+    ["no conversation", { turnId: TURN_ID, sentAt: TURN.sentAt }],
     [
       "a conversation ending with the assistant",
       {
         turnId: TURN_ID,
+        sentAt: TURN.sentAt,
         messages: [
           { role: "user", text: "Hej" },
           { role: "assistant", text: "Hej" },

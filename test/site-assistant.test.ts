@@ -13,7 +13,13 @@ import {
   type SiteTurnResponse,
 } from "../src/assistant/site-assistant.ts";
 import { canonicalJson } from "../src/assistant/tool-loop.ts";
-import { TURN_KEPT_MS, TURN_STALE_MS, TURNS } from "../src/assistant/turns.ts";
+import {
+  TURN_ACCEPTED_MS,
+  TURN_KEPT_MS,
+  TURN_REMEMBERED_MS,
+  TURN_STALE_MS,
+  TURNS,
+} from "../src/assistant/turns.ts";
 import { AiGateway } from "../src/gateway.ts";
 import type { ModelToolResult, ModelUserMessage } from "../src/provider.ts";
 import {
@@ -47,7 +53,11 @@ interface Setup extends StandIn {
   actions: StandInActions;
   provider: FakeProvider;
   clock: { now: Date };
-  turn(turnId?: string, text?: string): Promise<SiteTurnResponse>;
+  turn(
+    turnId?: string,
+    text?: string,
+    sentAt?: Date,
+  ): Promise<SiteTurnResponse>;
 }
 
 function setup(options: StandInOptions = {}): Setup {
@@ -66,12 +76,16 @@ function setup(options: StandInOptions = {}): Setup {
     actions,
     provider,
     clock,
-    turn: (turnId = TURN_ID, text = "Skriv en nyhet om städdagen.") =>
+    turn: (
+      turnId = TURN_ID,
+      text = "Skriv en nyhet om städdagen.",
+      sentAt = clock.now,
+    ) =>
       runSiteTurn(
         { ...host, actions: actions.asHost() },
         gateway,
         REQUEST,
-        { turnId, messages: [{ role: "user", text }] },
+        { turnId, sentAt, messages: [{ role: "user", text }] },
         () => clock.now,
       ),
   };
@@ -399,6 +413,96 @@ describe("a retried turn", () => {
     expect(provider.calls).toEqual([]);
   });
 
+  it("proposes nothing again once its pending changes are no longer kept", async () => {
+    const stand = setup();
+    const { actions, provider, turn, clock } = stand;
+    const sentAt = clock.now;
+    provider.answers.push(
+      toolUse({ name: "news_create", input: NEWS }),
+      answer(),
+    );
+    await turn(TURN_ID, undefined, sentAt);
+
+    // The answer was lost, and the person sends the turn again an hour on,
+    // after other turns have emptied its record.
+    clock.now = new Date(sentAt.getTime() + TURN_KEPT_MS + 1);
+    await sweepUntil(stand, () => {
+      const held = stand.records.value(TURNS, TURN_ID) as
+        { proposals: unknown[] } | undefined;
+      return held?.proposals.length === 0;
+    });
+    const calls = provider.calls.length;
+    provider.answers.push(
+      toolUse({ name: "news_create", input: NEWS }),
+      answer(),
+    );
+
+    expect(await turn(TURN_ID, undefined, sentAt)).toEqual({
+      outcome: "expired",
+    });
+    expect(provider.calls).toHaveLength(calls);
+    expect(actions.held.map((held) => held.name)).toEqual(["news_create"]);
+  });
+
+  it("proposes nothing again once its record is gone", async () => {
+    const stand = setup();
+    const { actions, provider, turn, clock } = stand;
+    const sentAt = clock.now;
+    provider.answers.push(
+      toolUse({ name: "news_create", input: NEWS }),
+      answer(),
+    );
+    await turn(TURN_ID, undefined, sentAt);
+
+    clock.now = new Date(sentAt.getTime() + TURN_REMEMBERED_MS + 1);
+    await sweepUntil(stand, () => !stand.records.keys(TURNS).includes(TURN_ID));
+    const calls = provider.calls.length;
+    provider.answers.push(
+      toolUse({ name: "news_create", input: NEWS }),
+      answer(),
+    );
+
+    expect(await turn(TURN_ID, undefined, sentAt)).toEqual({
+      outcome: "expired",
+    });
+    expect(provider.calls).toHaveLength(calls);
+    expect(actions.held.map((held) => held.name)).toEqual(["news_create"]);
+    expect(stand.records.keys(TURNS)).not.toContain(TURN_ID);
+  });
+
+  it.each([
+    ["more than a week ago", -TURN_ACCEPTED_MS - 1],
+    ["more than a week ahead", TURN_ACCEPTED_MS + 1],
+  ])(
+    "is not run when it was first sent %s, and leaves no record",
+    async (_case, offset) => {
+      const { records, provider, turn, clock } = setup();
+      provider.answers.push(
+        toolUse({ name: "news_create", input: NEWS }),
+        answer(),
+      );
+
+      expect(
+        await turn(TURN_ID, undefined, new Date(clock.now.getTime() + offset)),
+      ).toEqual({ outcome: "expired" });
+      expect(provider.calls).toEqual([]);
+      expect(records.keys(TURNS)).toEqual([]);
+    },
+  );
+
+  it("runs when it was first sent within the week, whatever the clock", async () => {
+    const { provider, turn, clock } = setup();
+    provider.answers.push(answer());
+
+    expect(
+      await turn(
+        TURN_ID,
+        undefined,
+        new Date(clock.now.getTime() - TURN_ACCEPTED_MS),
+      ),
+    ).toMatchObject({ outcome: "answered" });
+  });
+
   it("is a turn of its own under another id", async () => {
     const { actions, provider, turn } = setup();
     provider.answers.push(
@@ -417,8 +521,10 @@ describe("a retried turn", () => {
 });
 
 describe("what the package keeps of a turn", () => {
-  it("is the receipts and nothing anybody wrote, and it is gone after an hour", async () => {
-    const { records, provider, turn, clock } = setup();
+  it("is the receipts and nothing anybody wrote, emptied after an hour and gone after two weeks", async () => {
+    const stand = setup();
+    const { records, provider, turn, clock } = stand;
+    const startedAt = clock.now;
     provider.answers.push(
       toolUse({ name: "news_create", input: NEWS }),
       answer({}, "Nyheten om städdagen väntar."),
@@ -431,20 +537,41 @@ describe("what the package keeps of a turn", () => {
       expect(kept).not.toContain(written);
     }
 
-    clock.now = new Date(clock.now.getTime() + TURN_KEPT_MS + 1);
-    provider.answers.push(answer());
-    // A sweep starts at a random key; keep going until it reaches this one.
-    for (
-      let tries = 0;
-      tries < 20 && records.keys(TURNS).includes(TURN_ID);
-      tries++
-    ) {
-      await turn(crypto.randomUUID());
-      provider.answers.push(answer());
-    }
+    clock.now = new Date(startedAt.getTime() + TURN_KEPT_MS + 1);
+    await sweepUntil(
+      stand,
+      () => !JSON.stringify(records.value(TURNS, TURN_ID)).includes("change-1"),
+    );
+    // All that is left is when the turn started.
+    expect(records.value(TURNS, TURN_ID)).toEqual({
+      startedAt: startedAt.toISOString(),
+      finished: true,
+      proposals: [],
+    });
+
+    clock.now = new Date(startedAt.getTime() + TURN_REMEMBERED_MS + 1);
+    await sweepUntil(stand, () => !records.keys(TURNS).includes(TURN_ID));
     expect(records.keys(TURNS)).not.toContain(TURN_ID);
   });
+
+  it("outlives every request that could still claim its id", () => {
+    // Claimed at most a week from when it was first sent, and claimable at
+    // most a week from then again.
+    expect(TURN_REMEMBERED_MS).toBeGreaterThanOrEqual(2 * TURN_ACCEPTED_MS);
+  });
 });
+
+/**
+ * Runs other turns until `done`. A sweep starts at a random key, so it takes
+ * a few to reach a given one.
+ */
+async function sweepUntil(stand: Setup, done: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 50 && !done(); tries++) {
+    stand.provider.answers.push(answer());
+    await stand.turn(crypto.randomUUID());
+  }
+  expect(done()).toBe(true);
+}
 
 describe("the conversation the view sends", () => {
   it("is read when it alternates from the person and ends with them", () => {

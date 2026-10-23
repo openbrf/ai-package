@@ -142,17 +142,22 @@ export function vetSiteCall(
  *
  * - The turn's outcome, with its proposals.
  * - `repeated`: the turn had run already; these are the changes it proposed.
- * - `in-progress`: the turn is still running.
+ * - `in-progress`: the turn is still running; the view may send it again.
+ * - `expired`: the turn was first sent too long ago to run, or its pending
+ *   changes are no longer kept to tell; nothing ran.
  * - `host-unsupported`: the instance cannot hold a change, so no turn ran.
  */
 export type SiteTurnResponse =
   | TurnOutcome
   | { readonly outcome: "repeated"; readonly proposals: readonly Proposal[] }
   | { readonly outcome: "in-progress" }
+  | { readonly outcome: "expired" }
   | { readonly outcome: "host-unsupported" };
 
 export interface SiteTurn {
   readonly turnId: string;
+  /** When the view first sent the turn. */
+  readonly sentAt: Date;
   readonly messages: readonly ConversationMessage[];
 }
 
@@ -170,12 +175,15 @@ export async function runSiteTurn(
     return { outcome: "host-unsupported" };
   }
 
-  const claim = await new Turns(records, now).claim(turn.turnId);
+  const claim = await new Turns(records, now).claim(turn.turnId, turn.sentAt);
   if (claim.kind === "repeated") {
     return { outcome: "repeated", proposals: claim.proposals };
   }
   if (claim.kind === "in-progress") {
     return { outcome: "in-progress" };
+  }
+  if (claim.kind === "expired") {
+    return { outcome: "expired" };
   }
 
   const messages: ModelMessage[] = turn.messages.map((message) =>

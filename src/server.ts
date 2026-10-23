@@ -22,7 +22,7 @@ import {
   runSiteTurn,
   type SiteTurnResponse,
 } from "./assistant/site-assistant.ts";
-import { isTurnId } from "./assistant/turns.ts";
+import { isTurnId, sentAtOf } from "./assistant/turns.ts";
 import { AiGateway, type AiStatus } from "./gateway.ts";
 import type { AiPackageHost } from "./host-contract.ts";
 
@@ -99,16 +99,21 @@ export const createPlugin: PluginModuleFactory = (
       if (app !== null) {
         throw new ForbiddenException();
       }
-      const { turnId, messages } =
-        typeof body === "object" && body !== null
-          ? (body as Record<string, unknown>)
-          : {};
+      const {
+        turnId,
+        sentAt: sent,
+        messages,
+      } = typeof body === "object" && body !== null
+        ? (body as Record<string, unknown>)
+        : {};
       const conversation = conversationOf(messages);
-      if (!isTurnId(turnId) || conversation === null) {
+      const sentAt = sentAtOf(sent);
+      if (!isTurnId(turnId) || sentAt === null || conversation === null) {
         throw new BadRequestException();
       }
       return runSiteTurn(host, gateway, request, {
         turnId,
+        sentAt,
         messages: conversation,
       });
     }

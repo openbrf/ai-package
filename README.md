@@ -90,16 +90,21 @@ instance offers an AI package (ADR 0038 in openbrf/openbrf, "News and pages on
 ### One turn, run once
 
 The view gives every turn an id of its own, and sends a turn whose answer
-never arrived again under the same id. The first request with an id claims it
-in the package's records before the model is called, and a later one runs
-nothing: it is answered with the changes the turn proposed, or told that the
-turn is still running. So a retried turn proposes nothing twice, and within a
-turn a change the model asks for twice is proposed once.
+never arrived, or that is still running, again under the same id and with the
+time it first sent it. The first request with an id claims it in the
+package's records before the model is called, and a later one runs nothing: it
+is answered with the changes the turn proposed, told that the turn is still
+running, or, after an hour, told that the turn is over. A turn first sent more
+than a week before, or dated more than a week ahead, is not run at all. So a
+retried turn proposes nothing twice, however late it is sent again, and within
+a turn a change the model asks for twice is proposed once.
 
 The record holds each pending change's id, action, address and expiry, and
 nothing anybody wrote: not the request, not the answer, not what a change
-would write, and not who asked. It is deleted after an hour, long before the
-pending changes it names lapse.
+would write, and not who asked. After an hour the pending changes are removed
+from it, leaving only the time the turn started, and after two weeks the
+record is deleted: by then the route refuses every request that could carry
+its id.
 
 ### What is sent to the model
 
@@ -187,10 +192,16 @@ and the two limits. It requires `association:read`, the board's reading of how
 the instance is configured, and refuses a connected app.
 
 `POST /api/plugin/ai-package/assistants/site/turns` takes one turn of the site
-and news assistant: `turnId`, a UUID the view mints, and `messages`, the
+and news assistant: `turnId`, a UUID the view mints, `sentAt`, the time the
+view first sent the turn as `Date.toISOString()` writes it, and `messages`, the
 conversation so far as alternating `{ role, text }` from the person and the
 assistant, ending with the person. It answers with the outcome, the model's
-answer and the pending changes the turn proposed. It requires `site:manage`
+answer and the pending changes the turn proposed. A turn arrives again under
+the same `turnId` and `sentAt` when its answer was lost, and runs once: a
+repeat is answered with the changes the turn proposed, `in-progress` while it
+runs, or `expired` once those changes are no longer kept, an hour on. A turn
+whose `sentAt` is more than a week from the server's time runs not at all and
+is answered `expired`. It requires `site:manage`
 and refuses a connected app, whose token would put the turn's calls on `mcp`
 rather than `ai`.
 
