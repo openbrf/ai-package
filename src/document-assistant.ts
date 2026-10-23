@@ -315,8 +315,11 @@ export class DocumentAssistant {
       const uses = response.message.content.filter(
         (block): block is ModelToolUse => block.type === "tool_use",
       );
+      // A response that used the budget up is the question's last turn too:
+      // the loop would refuse another call, so a read it asks for is no use.
+      const ending = last || used >= QUESTION_TOKEN_BUDGET;
       if (uses.length === 0) {
-        if (reminded || last) {
+        if (reminded || ending) {
           throw new AssistantRefusal("no-answer");
         }
         reminded = true;
@@ -324,12 +327,12 @@ export class DocumentAssistant {
         continue;
       }
 
-      const results = await session.answer(uses, last);
+      const results = await session.answer(uses, ending);
       const finished = results.find((outcome) => outcome.kind === "finished");
       if (finished !== undefined) {
         return finished.answer;
       }
-      if (last) {
+      if (ending) {
         throw new AssistantRefusal("no-answer");
       }
       messages.push({

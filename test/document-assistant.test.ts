@@ -752,6 +752,25 @@ describe("the question's token budget", () => {
     expect(refused.reason).toBe("no-answer");
   });
 
+  it("dispatches no read of a call that uses the budget up exactly", async () => {
+    const { assistant, provider, archive } = setup();
+    provider.answers.push(
+      costing(turn(use("document_list", {})), 40_000),
+      costing(turn(use("document_list", {})), 40_000),
+      costing(turn(use("document_list", {})), 40_000),
+      costing(turn(read(BYLAWS.id)), QUESTION_TOKEN_BUDGET - 120_000),
+    );
+
+    const refused = await refusal(
+      assistant.ask(REQUEST, QUESTION),
+      AssistantRefusal,
+    );
+
+    expect(refused.reason).toBe("no-answer");
+    expect(provider.calls).toHaveLength(4);
+    expect(archive.dispatched).toHaveLength(3);
+  });
+
   it("accepts an answer from a call that ends exactly on the budget", async () => {
     const { assistant, provider } = setup();
     provider.answers.push(
