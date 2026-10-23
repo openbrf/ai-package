@@ -76,6 +76,13 @@ export interface ModelRequest {
   /** The most the answer may run to, in tokens. */
   readonly maxOutputTokens: number;
   readonly effort?: ModelEffort;
+  /**
+   * A JSON Schema the answer's text follows, for an answer that is data rather
+   * than prose. The provider holds the model to it. The caller still parses
+   * and checks the text: an answer cut short or declined need not follow it,
+   * and a provider may support less of JSON Schema than the caller checks.
+   */
+  readonly outputSchema?: Readonly<Record<string, unknown>>;
   /** How long to wait for the answer. Two minutes when left out. */
   readonly timeoutMs?: number;
 }

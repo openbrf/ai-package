@@ -4,8 +4,9 @@ An [Open BRF](https://github.com/openbrf/openbrf) plugin that gives a housing
 cooperative's board assistants built on a language model, on the association's
 own model provider account and within a monthly limit the board sets.
 
-This release is the package's foundation: the settings, the way to the model,
-the licence check, and the limits. The assistants come in later releases.
+The package holds the settings, the way to the model, the licence check and
+the limits, and its first assistant: meeting support, which drafts a general
+meeting's agenda and its minutes. The other assistants come in later releases.
 
 ## How it works
 
@@ -42,6 +43,49 @@ the licence check, and the limits. The assistants come in later releases.
   model Anthropic recommends for that kind of decline. Claude Haiku 5.5 has
   none. A request that is declined all the same comes back with the stop reason
   `refusal`.
+
+## Meeting support
+
+Two drafts for a general meeting (föreningsstämma), for a board member holding
+`meetings:manage`, the capability the platform's own meetings screen requires.
+Both read the meeting through the platform's own actions, `meeting_list` and
+`meeting_get`: the day, the kind, the agenda, each decision's outcome and vote
+totals, and the notice's time and place. Neither action returns a person: not
+who attended, not the proxy authorisations, not how anybody voted. The model is
+offered no tools. It reads what the package hands it and answers with a draft,
+so text in a meeting's record or in the notes can change a draft and nothing
+else.
+
+- **An agenda draft** (`POST /api/plugin/ai-package/meetings/:meetingId/agenda-draft`,
+  with optional `instructions` and `language`). The draft starts from the
+  agenda of the last meeting of the same kind that was held, or, for an
+  ordinary meeting without one, from the matters model bylaws usually list. It
+  is proposed as `meeting_set_agenda`, a pending change: nothing is written
+  until the board member confirms it on the platform's own screen, at the
+  `path` the answer gives, and they can reject it there. The proposal names the
+  agenda it was drafted against, so a draft confirmed after somebody rewrote the
+  agenda is refused rather than written over. It is refused before the model is
+  called once the notice has been issued or the meeting has been recorded as
+  held, because the agenda can then no longer change.
+- **A minutes draft** (`POST /api/plugin/ai-package/meetings/:meetingId/minutes-draft`,
+  with `notes` and an optional `language`). The board member's notes and the
+  meeting's record become a draft of the minutes, item by item, with the
+  decisions as recorded. The draft is handed back and kept nowhere, here or in
+  the archive. The board corrects it, has it signed and files it as before.
+
+A draft is written in the language the body names, `sv` or `en`, or else the
+request's. A connected app is refused both routes. A refusal answers with a
+`reason`: `notice-already-issued` or `meeting-already-held` (409), `no-draft`
+when the model declined or gave no usable draft (422),
+`personal-identity-number` when the request, the notes or the meeting's record
+(the agenda's titles, the previous meeting's agenda, the notice's place and its
+digital participation) hold one, which is then not sent anywhere (400), the
+gateway's reasons (see above), and `host-unsupported` (501) on an instance without
+`meeting_set_agenda` or pending changes. The platform's own refusals, such as
+`meeting-not-found`, come back as the platform gives them.
+
+The routes are the server half of meeting support. The board's screen for them
+comes with the package's first view.
 
 ## Settings
 
@@ -82,9 +126,11 @@ the provider's answer and that record; a refused write fails the call.
 ## Data protection
 
 The assistants send the association's text to Anthropic: issue reports,
-messages from residents and the board's own drafts. That text can name
-residents and their apartments, and residents sometimes write about their
-health. The manifest declares this for the board to read on the consent screen
+messages from residents and the board's own drafts. Meeting support sends a
+meeting's agenda, its decisions as totals, the notice's time and place, and the
+board member's request or notes, which can name the members who spoke or were
+elected. That text can name residents and their apartments, and residents
+sometimes write about their health. The manifest declares this for the board to read on the consent screen
 before the package is installed: the personal-data categories `name`,
 `apartment`, `freeText` and `health`, and the one recipient that receives them.
 
@@ -128,10 +174,11 @@ pnpm typecheck
 pnpm build
 ```
 
-`pnpm test` runs the gateway against a fake provider and the Anthropic adapter
-against a stand-in for the host's way out, with the package's records in
-memory. It also loads the bundle the package ships into a NestJS application on
-Fastify and reads the status route.
+`pnpm test` runs the gateway and meeting support against a fake provider and
+the Anthropic adapter against a stand-in for the host's way out, with the
+package's records in memory and the platform's meeting actions stood in for. It
+also loads the bundle the package ships into a NestJS application on Fastify
+and calls the status route and the meeting support routes.
 
 The server entry point is one CommonJS bundle, `dist/server.cjs`, whose only
 externals are `@nestjs/common` and Node's built-ins. `pnpm check:package` runs

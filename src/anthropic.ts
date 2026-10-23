@@ -150,6 +150,20 @@ export function requestBody(
   fallback: boolean,
 ): RequestBody {
   const { request } = call;
+  // The answer's format, where one is asked for, rather than a tool the model
+  // is made to call: the models this package offers refuse a forced tool
+  // choice. A fallback attempt keeps the request's format.
+  const outputConfig: NonNullable<RequestBody["output_config"]> = {
+    ...(request.effort === undefined ? {} : { effort: request.effort }),
+    ...(request.outputSchema === undefined
+      ? {}
+      : {
+          format: {
+            type: "json_schema" as const,
+            schema: { ...request.outputSchema },
+          },
+        }),
+  };
   return {
     model,
     max_tokens: request.maxOutputTokens,
@@ -167,9 +181,9 @@ export function requestBody(
             },
           })),
         }),
-    ...(request.effort === undefined
+    ...(Object.keys(outputConfig).length === 0
       ? {}
-      : { output_config: { effort: request.effort } }),
+      : { output_config: outputConfig }),
     ...(fallback ? { fallbacks: "default" as const } : {}),
   };
 }

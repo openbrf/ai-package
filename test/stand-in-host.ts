@@ -221,8 +221,62 @@ export function answer(
   };
 }
 
+/** A refusal as the host's registry builds one, read by its name. */
+export function actionRefusal(
+  reason: string,
+  status: number,
+  kind: "registry" | "invalid-body" | "domain" = "domain",
+): Error {
+  return Object.assign(new Error(`refused: ${reason}`), {
+    name: "ActionRefusal",
+    kind,
+    reason,
+    status,
+    getStatus: () => status,
+  });
+}
+
+/**
+ * The core's actions as the package calls them: each name answers with what
+ * the test gives it, every call is kept, and a proposal is held and answered
+ * with a receipt.
+ */
+export class StandInActions {
+  readonly invoked: { name: string; input: unknown }[] = [];
+  readonly proposed: { name: string; input: unknown }[] = [];
+  /** What each action answers with, or the refusal it rejects with. */
+  readonly answers = new Map<string, (input: unknown) => unknown>();
+  /** The actions `list` offers. All the meeting actions unless a test says. */
+  offered: string[] = ["meeting_list", "meeting_get", "meeting_set_agenda"];
+  /** Set to false to stand in for a host without pending changes. */
+  proposes = true;
+
+  async list(): Promise<{ name: string }[]> {
+    return this.offered.map((name) => ({ name }));
+  }
+
+  async invoke(_request: unknown, name: string, input: unknown) {
+    this.invoked.push({ name, input });
+    const answer = this.answers.get(name);
+    if (answer === undefined) {
+      throw actionRefusal("unknown-action", 404, "registry");
+    }
+    return answer(input);
+  }
+
+  async propose(_request: unknown, name: string, input: unknown) {
+    this.proposed.push({ name, input });
+    return {
+      id: `pending-${String(this.proposed.length)}`,
+      expiresAt: new Date("2026-10-29T09:41:12Z"),
+      path: `/app/pending-changes/pending-${String(this.proposed.length)}`,
+    };
+  }
+}
+
 export interface StandIn {
   host: AiPackageHost;
+  actions: StandInActions;
   settings: Record<string, unknown>;
   records: MemoryRecords;
   recipients: StandInRecipients;
@@ -252,6 +306,7 @@ export function standIn(options: StandInOptions = {}): StandIn {
   const recipients = new StandInRecipients();
   const entitlement = { state: options.entitlement ?? ACTIVE };
   const logged: StandIn["logged"] = [];
+  const actions = new StandInActions();
   const log =
     (level: string) =>
     (message: string): void => {
@@ -270,8 +325,15 @@ export function standIn(options: StandInOptions = {}): StandIn {
     settings: { read: async () => ({ ...settings }) },
     actions: {
       register: () => undefined,
-      list: async () => [],
-      invoke: async () => undefined,
+      list: (request: unknown) => actions.list(),
+      invoke: (request: unknown, name: string, input: unknown) =>
+        actions.invoke(request, name, input),
+      get propose() {
+        return actions.proposes
+          ? (request: unknown, name: string, input: unknown) =>
+              actions.propose(request, name, input)
+          : undefined;
+      },
       client: () =>
         options.connectedApp === true
           ? { clientId: "client-1", clientHost: "client.example" }
@@ -284,5 +346,13 @@ export function standIn(options: StandInOptions = {}): StandIn {
       : { entitlements: { get: async () => entitlement.state } }),
   } as unknown as AiPackageHost;
 
-  return { host, settings, records, recipients, entitlement, logged };
+  return {
+    host,
+    actions,
+    settings,
+    records,
+    recipients,
+    entitlement,
+    logged,
+  };
 }

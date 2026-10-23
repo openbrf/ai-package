@@ -150,9 +150,25 @@ export interface ActionClient {
   readonly clientHost: string | null;
 }
 
-/** `PluginActions`, with `client` where the host has it. */
+/**
+ * `PendingChangeReceipt`: a write held for the person to confirm (ADR 0039).
+ * Nothing has run; the person confirms or rejects it at `path`.
+ */
+export interface PendingChangeReceipt {
+  readonly id: string;
+  readonly expiresAt: Date;
+  /** The preview, on the platform's own screen, relative to the origin. */
+  readonly path: string;
+}
+
+/** `PluginActions`, with `client` and `propose` where the host has them. */
 export type AiPackageActions = PluginHost["actions"] & {
   readonly client?: (request: ActionRequest) => ActionClient | null;
+  readonly propose?: (
+    request: ActionRequest,
+    name: string,
+    input: unknown,
+  ) => Promise<PendingChangeReceipt>;
 };
 
 /** The host object, with the members above where the host has them. */
