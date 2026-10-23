@@ -56,9 +56,8 @@ export const MAX_MODEL_CALLS = 3;
  * fit with room to spare; a triage is not asked when less than this is left
  * of the month.
  *
- * A call is made only when the most it can use fits in what is left of the
- * budget and of the month, so a triage never passes either: see
- * `callAtMost`.
+ * A call is made only when the most it can use, as `callAtMost` bounds it,
+ * fits in what is left of the budget and of the month.
  */
 export const TRIAGE_TOKEN_BUDGET = 40_000;
 
