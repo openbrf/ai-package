@@ -60,8 +60,10 @@ instance offers an AI package (ADR 0038 in openbrf/openbrf, "News and pages on
   Each one becomes a pending change (ADR 0039 in openbrf/openbrf), and the
   view links to it on the platform's own pending changes screen, where the
   board member reads it field by field and confirms or rejects it. The view
-  has no confirm button, and the package cannot confirm a change. A pending
-  change lapses after a week.
+  has no confirm button, and the package cannot confirm a change. The view
+  also always links that screen itself, so a reload or a new conversation
+  does not cut the way to changes still open. A pending change lapses after
+  a week.
 - **Mailings are a step of their own.** The assistant cannot mail the members.
   If asked to, it proposes a mailing request (`news_request_mailing`), which
   records the request once confirmed and sends nothing. A board member then
