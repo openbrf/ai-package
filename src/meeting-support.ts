@@ -9,6 +9,7 @@ import {
   agendaSystem,
   minutesPrompt,
   minutesSystem,
+  MOTION_ITEM_LIMIT,
 } from "./meeting-prompts.ts";
 import type { Language } from "./messages.ts";
 import { holdsPersonalIdentityNumber } from "./personal-identity-number.ts";
@@ -186,7 +187,10 @@ export type MeetingMotions = {
     readonly title: string;
     readonly acknowledged: boolean;
   }[];
-  /** Whether the host left motions out to keep to its limit. */
+  /**
+   * Whether motions were left out: by the host to keep to its limit, or by
+   * the package to leave room in the agenda for the meeting's other matters.
+   */
   readonly more: boolean;
 } | null;
 
@@ -366,11 +370,11 @@ export class MeetingSupport {
       await this.host.actions.invoke(request, MOTIONS_ACTION, { meetingId }),
     );
     return {
-      motions: read.motions.map((motion) => ({
+      motions: read.motions.slice(0, MOTION_ITEM_LIMIT).map((motion) => ({
         title: motion.title,
         acknowledged: motion.status === "ACKNOWLEDGED",
       })),
-      more: read.more,
+      more: read.more || read.motions.length > MOTION_ITEM_LIMIT,
     };
   }
 

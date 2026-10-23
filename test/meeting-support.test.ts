@@ -349,6 +349,75 @@ describe("an agenda draft", () => {
     );
   });
 
+  it("takes up the motions of an extraordinary meeting without a request from the board", async () => {
+    const { support, provider, actions } = setup();
+    const extra = {
+      ...MEETING,
+      id: "meeting-extra-2027",
+      kind: "EXTRAORDINARY",
+      heldOn: "2027-02-10",
+    };
+    MEETINGS[extra.id] = extra;
+    try {
+      actions.offered = [...actions.offered, "motion_meeting_list"];
+      actions.answers.set("motion_meeting_list", () => ({
+        motions: [
+          { id: "m-1", title: "Cykelställ vid porten", status: "SUBMITTED" },
+        ],
+        more: false,
+      }));
+      provider.answers.push(agendaAnswer());
+
+      await support.draftAgenda(REQUEST, extra.id, SV);
+
+      const call = provider.calls[0]?.request;
+      const prompt = call?.messages[0]?.content as string;
+      expect(prompt).toContain("Cykelställ vid porten");
+      expect(prompt).toContain("<board-request>\nnull\n</board-request>");
+      // The instructions do not limit the matters to those the request names.
+      expect(call?.system).toContain(
+        "the motions given in the motions tag, each as above, and the matters the board's request names, if it names any",
+      );
+      expect(call?.system).not.toContain("which the board's request names");
+    } finally {
+      delete MEETINGS[extra.id];
+    }
+  });
+
+  it("hands the model at most 80 motions and tells the board to add the rest", async () => {
+    const { support, provider, actions } = setup();
+    actions.offered = [...actions.offered, "motion_meeting_list"];
+    actions.answers.set("motion_meeting_list", () => ({
+      motions: Array.from({ length: 100 }, (_, index) => ({
+        id: `m-${index}`,
+        title: `Motion ${index + 1}`,
+        status: "ACKNOWLEDGED",
+      })),
+      more: false,
+    }));
+    provider.answers.push(agendaAnswer());
+
+    await support.draftAgenda(REQUEST, MEETING.id, SV);
+
+    const call = provider.calls[0]?.request;
+    const prompt = call?.messages[0]?.content as string;
+    const tag = prompt.slice(
+      prompt.indexOf("<motions>") + "<motions>".length,
+      prompt.indexOf("</motions>"),
+    );
+    const given = JSON.parse(tag) as {
+      motions: { title: string }[];
+      more: boolean;
+    };
+    expect(given.motions).toHaveLength(80);
+    expect(given.motions[79]?.title).toBe("Motion 80");
+    expect(given.more).toBe(true);
+    expect(call?.system).toContain("At most 80 motions are given");
+    expect(call?.system).toContain(
+      "the board must add the rest before confirming it",
+    );
+  });
+
   it("says where the motions belong on a host that does not let it read them", async () => {
     // An older host, or a board member without motions:handle: the host's
     // listing leaves the read out either way, and the draft goes ahead.

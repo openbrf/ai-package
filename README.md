@@ -62,7 +62,10 @@ else.
   ordinary meeting without one, from the matters model bylaws usually list.
   The motions put to the meeting are read through `motion_meeting_list`: each
   one's title and whether the board has acknowledged it, never who submitted
-  it. The draft gives each motion an item of its own. On an instance without
+  it. The draft gives each motion an item of its own, also for an
+  extraordinary meeting and without a request from the board, up to 80 motions: if
+  more were put to the meeting, the draft lists the first 80 and its note tells
+  the board to add the rest before confirming. On an instance without
   that action, or for a board member who does not hold `motions:handle`, the
   draft says where the motions belong instead. The draft is proposed as
   `meeting_set_agenda`, a pending change: nothing is written
