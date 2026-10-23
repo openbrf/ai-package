@@ -152,6 +152,29 @@ describe("what is sent", () => {
     expect(sentBody(recipients).model).toBe("claude-haiku-5-5");
   });
 
+  it("asks for the answer's format beside the effort, never as a forced tool", async () => {
+    const { recipients, provider } = setup();
+    recipients.answer(200, message());
+    const schema = {
+      type: "object",
+      properties: { items: { type: "array", items: { type: "string" } } },
+      required: ["items"],
+      additionalProperties: false,
+    };
+
+    await provider.complete(
+      call({ request: { ...REQUEST, effort: "low", outputSchema: schema } }),
+    );
+
+    const body = sentBody(recipients);
+    expect(body.output_config).toEqual({
+      effort: "low",
+      format: { type: "json_schema", schema },
+    });
+    expect(body).not.toHaveProperty("tool_choice");
+    expect(body).not.toHaveProperty("tools");
+  });
+
   it("sends tools, effort and a conversation with tool results in the API's shapes", async () => {
     const { recipients, provider } = setup();
     recipients.answer(200, message());
