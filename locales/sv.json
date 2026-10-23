@@ -36,6 +36,10 @@
     "working": "Assistenten arbetar …",
     "newConversation": "Ny konversation",
     "retry": "Försök igen",
+    "pendingChanges": {
+      "open": "Öppna Väntande ändringar",
+      "openExpired": "Gå till Väntande ändringar"
+    },
     "proposals": {
       "heading": "Väntar på din bekräftelse",
       "open": "Läs och bekräfta: {{title}}",
@@ -48,7 +52,7 @@
       "failed": "Något gick fel på servern. Ändringar som redan lagts fram står nedan.",
       "repeated": "Den här frågan var redan besvarad.",
       "inProgress": "Assistenten arbetar fortfarande med den här frågan. Försök igen om en stund, så visas det den har lagt fram.",
-      "expired": "Frågan skickades för länge sedan för att kunna besvaras igen. Ändringar den lade fram finns under Väntande ändringar."
+      "expired": "Frågan skickades för länge sedan för att kunna besvaras igen. Ändringar den lade fram som fortfarande är öppna finns under Väntande ändringar."
     },
     "refused": {
       "host-unsupported": "Den här Open BRF-installationen är för gammal för assistenten.",

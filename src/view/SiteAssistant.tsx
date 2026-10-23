@@ -30,7 +30,10 @@ import { NAMESPACE, styles } from "./styles.ts";
  * conversation so far, and the model's answer comes back with the pending
  * changes it proposed. Each is a link to the platform's own pending changes
  * screen, where the person reads the change field by field and confirms or
- * rejects it: this view confirms nothing and has no button that could.
+ * rejects it: this view confirms nothing and has no button that could. A link
+ * to the screen itself is always shown, and it keeps nothing of the
+ * conversation, so starting over leaves the person a way to the changes
+ * already put forward.
  *
  * One turn at a time. A turn that got no answer, because the connection
  * failed or the turn is still running, is sent again under the same id and
@@ -39,6 +42,14 @@ import { NAMESPACE, styles } from "./styles.ts";
  */
 
 const ROUTE = "/api/plugin/ai-package/assistants/site/turns";
+
+/**
+ * The platform's pending changes screen. The conversation is not kept, so a
+ * reload or a new conversation drops the links to what was proposed, while
+ * the proposals stay there to be confirmed until they expire. The view
+ * therefore always links the screen itself, whatever the conversation holds.
+ */
+const PENDING_CHANGES_PATH = "/app/pending-changes";
 
 type Notice =
   | "outcome.cutShort"
@@ -180,6 +191,19 @@ function ProposalList({
   );
 }
 
+function PendingChangesLink({
+  label,
+}: {
+  label: "site.pendingChanges.open" | "site.pendingChanges.openExpired";
+}): ReactElement {
+  const { t } = useTranslation(NAMESPACE);
+  return (
+    <a href={PENDING_CHANGES_PATH} style={styles.link}>
+      {t(label)}
+    </a>
+  );
+}
+
 function EntryView({ entry }: { entry: Entry }): ReactElement {
   const { t } = useTranslation(NAMESPACE);
   if (entry.kind === "person") {
@@ -202,6 +226,9 @@ function EntryView({ entry }: { entry: Entry }): ReactElement {
       {entry.notice === null ? null : (
         <p style={warn}>{t(`site.${entry.notice}`)}</p>
       )}
+      {entry.notice === "outcome.expired" ? (
+        <PendingChangesLink label="site.pendingChanges.openExpired" />
+      ) : null}
       {entry.proposals.length === 0 ? null : (
         <ProposalList proposals={entry.proposals} />
       )}
@@ -341,6 +368,7 @@ export default function SiteAssistant(): ReactElement {
       <h3 style={styles.subheading}>{t("site.heading")}</h3>
       <p style={styles.muted}>{t("site.intro")}</p>
       <p style={styles.muted}>{t("site.mailingNote")}</p>
+      <PendingChangesLink label="site.pendingChanges.open" />
 
       {entries.length === 0 ? null : (
         <ol style={styles.list} aria-live="polite">
