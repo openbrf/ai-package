@@ -1,0 +1,30 @@
+{
+  "settings": {
+    "apiKey": {
+      "label": "API-nyckel för Anthropic",
+      "hint": "Föreningens egen nyckel, från föreningens konto hos Anthropic. Utan nyckel gör AI-paketet inga anrop. Nyckeln visas aldrig igen när den har sparats: byt ut den eller ta bort den här."
+    },
+    "model": {
+      "label": "Modell",
+      "hint": "Ju större modell, desto bättre utkast och desto mer kostar varje anrop på föreningens konto.",
+      "options": {
+        "opus": "Claude Opus 5.5 (mest kapabel)",
+        "sonnet": "Claude Sonnet 5.5 (balanserad)",
+        "haiku": "Claude Haiku 5.5 (snabbast och billigast)"
+      }
+    },
+    "monthlyTokenLimit": {
+      "label": "Gräns per månad, i token",
+      "hint": "Det mesta AI-paketet får använda under en kalendermånad, räknat på det som skickas och det som kommer tillbaka. En token är ungefär fyra tecken text. När gränsen är nådd stannar assistenterna tills nästa månad börjar. 0 stoppar dem direkt."
+    },
+    "requestsPerMinute": {
+      "label": "Anrop per minut",
+      "hint": "Det högsta antalet anrop till modellen som AI-paketet gör under en minut, för hela föreningen."
+    }
+  },
+  "cli": {
+    "packageCheckPasses_one": "{{tarball}}: paketkontrollen godkänner paketet ({{count}} fil).",
+    "packageCheckPasses_other": "{{tarball}}: paketkontrollen godkänner paketet ({{count}} filer).",
+    "sdkFromSourceUsage": "användning: node scripts/plugin-sdk-from-source.mjs <utcheckning av openbrf> <ut.mjs>"
+  }
+}

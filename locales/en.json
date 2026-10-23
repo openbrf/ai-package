@@ -1,0 +1,30 @@
+{
+  "settings": {
+    "apiKey": {
+      "label": "Anthropic API key",
+      "hint": "The association's own key, from its account with Anthropic. The AI package makes no calls without one. The key is never shown again once saved: replace it or clear it here."
+    },
+    "model": {
+      "label": "Model",
+      "hint": "The larger the model, the better its drafts and the more each call costs on the association's account.",
+      "options": {
+        "opus": "Claude Opus 5.5 (most capable)",
+        "sonnet": "Claude Sonnet 5.5 (balanced)",
+        "haiku": "Claude Haiku 5.5 (fastest and cheapest)"
+      }
+    },
+    "monthlyTokenLimit": {
+      "label": "Monthly limit, in tokens",
+      "hint": "The most the AI package may use in a calendar month, counting what it sends and what it gets back. A token is about four characters of text. Once the limit is reached, the assistants stop until the next month starts. 0 stops them at once."
+    },
+    "requestsPerMinute": {
+      "label": "Calls per minute",
+      "hint": "The most calls to the model the AI package makes in one minute, for the whole association."
+    }
+  },
+  "cli": {
+    "packageCheckPasses_one": "{{tarball}}: the package check passes ({{count}} file).",
+    "packageCheckPasses_other": "{{tarball}}: the package check passes ({{count}} files).",
+    "sdkFromSourceUsage": "usage: node scripts/plugin-sdk-from-source.mjs <openbrf checkout> <out.mjs>"
+  }
+}

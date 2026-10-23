@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege: checkout and dependency caching read the contents only.
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Format, typecheck, test, package check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Builds the bundle, and runs the gateway and the Anthropic adapter
+      # against a fake provider and the route from the bundle in NestJS.
+      - name: Test
+        run: pnpm test
+
+      # The SDK 1.0.0 cannot read this manifest (scripts/check-package.mjs says
+      # why), so the package check reads the SDK at a pinned commit of the
+      # core instead. Drop these two steps once a release of the SDK reads it.
+      - name: Check out the plugin SDK's source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: openbrf/openbrf
+          ref: 905a74cb4afc71b387cc23313041f5cc245e3714
+          path: openbrf
+          persist-credentials: false
+          sparse-checkout: packages/plugin-sdk/src
+
+      - name: Build the plugin SDK from its source
+        run: node scripts/plugin-sdk-from-source.mjs openbrf "$RUNNER_TEMP/plugin-sdk.mjs"
+
+      # The check the catalog runs before it lists a release, over the packed
+      # tarball.
+      - name: Package check
+        env:
+          OPENBRF_PLUGIN_SDK: ${{ runner.temp }}/plugin-sdk.mjs
+        run: pnpm build && pnpm check:package
