@@ -239,7 +239,7 @@ describe("the assistant's view", () => {
     expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull();
   });
 
-  it("says a turn sent too long ago is over, and takes the next question", async () => {
+  it("says a turn it cannot answer is over, and takes the next question", async () => {
     serve({ outcome: "expired" });
     show();
 
@@ -247,7 +247,7 @@ describe("the assistant's view", () => {
 
     expect(
       await screen.findByText(
-        "Frågan skickades för länge sedan för att kunna besvaras igen. Ändringar den lade fram som fortfarande är öppna finns under Väntande ändringar.",
+        "Frågan kan inte besvaras: den skickades första gången för länge sedan, eller så är datum och tid fel på den här enheten. Ändringar den lade fram som fortfarande är öppna finns under Väntande ändringar.",
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull();

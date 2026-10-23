@@ -143,8 +143,9 @@ export function vetSiteCall(
  * - The turn's outcome, with its proposals.
  * - `repeated`: the turn had run already; these are the changes it proposed.
  * - `in-progress`: the turn is still running; the view may send it again.
- * - `expired`: the turn was first sent too long ago to run, or its pending
- *   changes are no longer kept to tell; nothing ran.
+ * - `expired`: this request ran nothing. The turn is dated more than a week
+ *   from the server's time, so it was first sent too long ago or the
+ *   person's clock is off, or its pending changes are no longer kept to tell.
  * - `host-unsupported`: the instance cannot hold a change, so no turn ran.
  */
 export type SiteTurnResponse =
@@ -203,12 +204,14 @@ export async function runSiteTurn(
       maxOutputTokens: MAX_OUTPUT_TOKENS,
       maxRounds: MAX_ROUNDS,
       vet: vetSiteCall,
+      proceed: () => claim.turn.alive(),
       onProposal: (proposal) => claim.turn.proposed(proposal),
       logger: host.logger,
     });
   } finally {
     // Finished however it ended, so a retry is told what it proposed rather
-    // than that it is still running.
+    // than that it is still running. A turn another request took for dead is
+    // left as that request finished it.
     await claim.turn.finish();
   }
 }

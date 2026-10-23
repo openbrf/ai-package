@@ -19,6 +19,7 @@ import {
   TURN_REMEMBERED_MS,
   TURN_STALE_MS,
   TURNS,
+  Turns,
 } from "../src/assistant/turns.ts";
 import { AiGateway } from "../src/gateway.ts";
 import type { ModelToolResult, ModelUserMessage } from "../src/provider.ts";
@@ -411,6 +412,102 @@ describe("a retried turn", () => {
       proposals: [{ id: "change-9" }],
     });
     expect(provider.calls).toEqual([]);
+    // Finished, so its request, were it only slow, would propose no more.
+    expect(records.value(TURNS, TURN_ID)).toMatchObject({ finished: true });
+  });
+
+  it("is told a turn still running past ten minutes runs, and then what it proposed", async () => {
+    const { actions, provider, turn, clock } = setup({
+      settings: { requestsPerMinute: 120 },
+    });
+    const sentAt = clock.now;
+    // Six rounds of reads, each taking 101 seconds.
+    actions.onRead = () => {
+      clock.now = new Date(clock.now.getTime() + 101_000);
+    };
+    for (let round = 0; round < 6; round++) {
+      provider.answers.push(toolUse({ name: "news_get", input: { id: "n1" } }));
+    }
+    provider.answers.push(
+      toolUse({ name: "news_create", input: NEWS }),
+      answer(),
+    );
+    let release = (): void => undefined;
+    const first = turn(TURN_ID, undefined, sentAt);
+    // Hold the seventh call to the model, which proposes the news item.
+    while (actions.reads.length < 6) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    provider.gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    while (provider.calls.length < 7) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // Past ten minutes since the turn started, though not since it was last
+    // heard from.
+    clock.now = new Date(sentAt.getTime() + TURN_STALE_MS + 60_000);
+    expect(await turn(TURN_ID, undefined, sentAt)).toEqual({
+      outcome: "in-progress",
+    });
+
+    release();
+    expect(await first).toMatchObject({
+      outcome: "answered",
+      proposals: [{ id: "change-1" }],
+    });
+    expect(await turn(TURN_ID, undefined, sentAt)).toEqual({
+      outcome: "repeated",
+      proposals: [
+        {
+          id: "change-1",
+          action: "news_create",
+          title: "Title of news_create",
+          path: "/app/pending-changes/change-1",
+          expiresAt: "2026-10-29T09:41:12.000Z",
+        },
+      ],
+    });
+    expect(actions.held).toHaveLength(1);
+  });
+
+  it("proposes nothing more once a retry took it for dead", async () => {
+    const { actions, records, provider, turn, clock } = setup();
+    const sentAt = clock.now;
+    let release = (): void => undefined;
+    provider.gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    provider.answers.push(
+      toolUse({ name: "news_create", input: NEWS }),
+      answer(),
+    );
+    const first = turn(TURN_ID, undefined, sentAt);
+    while (provider.calls.length === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // Not heard from for ten minutes: the retry takes it for dead.
+    clock.now = new Date(sentAt.getTime() + TURN_STALE_MS);
+    expect(await turn(TURN_ID, undefined, sentAt)).toEqual({
+      outcome: "repeated",
+      proposals: [],
+    });
+
+    // The request was only slow; the model asks for a change all the same.
+    release();
+    expect(await first).toEqual({ outcome: "failed", proposals: [] });
+    expect(actions.held).toEqual([]);
+    expect(records.value(TURNS, TURN_ID)).toEqual({
+      startedAt: sentAt.toISOString(),
+      finished: true,
+      proposals: [],
+    });
+    expect(await turn(TURN_ID, undefined, sentAt)).toEqual({
+      outcome: "repeated",
+      proposals: [],
+    });
   });
 
   it("proposes nothing again once its pending changes are no longer kept", async () => {
@@ -552,6 +649,26 @@ describe("what the package keeps of a turn", () => {
     clock.now = new Date(startedAt.getTime() + TURN_REMEMBERED_MS + 1);
     await sweepUntil(stand, () => !records.keys(TURNS).includes(TURN_ID));
     expect(records.keys(TURNS)).not.toContain(TURN_ID);
+  });
+
+  it("is left alone by a sweep while the turn still runs", async () => {
+    const { records, clock } = setup();
+    const running = {
+      startedAt: new Date(clock.now.getTime() - TURN_KEPT_MS - 1).toISOString(),
+      aliveAt: clock.now.toISOString(),
+      finished: false,
+      proposals: [],
+    };
+    await records.put(TURNS, TURN_ID, running);
+
+    // A sweep from the first key reaches it.
+    await new Turns(
+      records,
+      () => clock.now,
+      () => "",
+    ).claim(OTHER_TURN, clock.now);
+
+    expect(records.value(TURNS, TURN_ID)).toEqual(running);
   });
 
   it("outlives every request that could still claim its id", () => {

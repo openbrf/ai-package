@@ -84,6 +84,8 @@ export class StandInActions {
   /** A refusal a proposal of an action is answered with, by action name. */
   readonly refusals = new Map<string, Error>();
   withPropose = true;
+  /** Called with each read, before it is answered. */
+  onRead: (name: string) => void = () => undefined;
 
   asHost(): AiPackageActions {
     const actions = {
@@ -103,6 +105,7 @@ export class StandInActions {
           throw new ActionRefusalStandIn("confirmation-required", "never");
         }
         this.reads.push({ name, input });
+        this.onRead(name);
         return (this.answers.get(name) ?? {}) as Output;
       },
       client: () => null,

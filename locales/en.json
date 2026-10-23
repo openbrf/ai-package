@@ -52,7 +52,7 @@
       "failed": "Something went wrong on the server. Changes already put forward are listed below.",
       "repeated": "This request had already been answered.",
       "inProgress": "The assistant is still working on this request. Try again in a moment, and you will be shown what it put forward.",
-      "expired": "This request was sent too long ago to be answered again. Any changes it put forward that are still open are under Pending changes."
+      "expired": "This request cannot be answered: it was first sent too long ago, or the date and time on this device are wrong. Any changes it put forward that are still open are under Pending changes."
     },
     "refused": {
       "host-unsupported": "This Open BRF instance is too old for the assistant.",

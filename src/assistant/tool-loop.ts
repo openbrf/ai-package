@@ -53,7 +53,8 @@ export interface Proposal {
  * - `too-many-rounds`: the model kept calling tools past the turn's limit.
  * - `declined`: the model declined to answer.
  * - `refused`: the gateway made no call, or the call gave no answer.
- * - `failed`: a call to the host failed in a way that is no answer at all.
+ * - `failed`: a call to the host failed in a way that is no answer at all, or
+ *   the turn may not go on (`proceed`).
  *
  * Whatever the end, `proposals` holds every change the turn proposed, which
  * stays proposed: the person decides each one on the pending changes screen.
@@ -104,6 +105,11 @@ export interface ToolLoopOptions {
    * model is answered with instead, or null to let it through.
    */
   readonly vet?: (action: ActionWithSchemas, input: unknown) => string | null;
+  /**
+   * Asked before each call to the model and each new proposal: false ends the
+   * turn there as `failed`, with nothing more called or proposed.
+   */
+  readonly proceed?: () => Promise<boolean>;
   /** Told of each proposal as it is made, before the model hears of it. */
   readonly onProposal?: (proposal: Proposal) => Promise<void>;
   readonly logger: { warn(message: string): void };
@@ -125,6 +131,9 @@ export async function runToolLoop(
 
   const messages: ModelMessage[] = [...options.messages];
   for (let round = 0; round < options.maxRounds; round++) {
+    if (!(await proceed())) {
+      return { outcome: "failed", proposals };
+    }
     let response: ModelResponse;
     try {
       response = await options.gateway.complete(
@@ -177,9 +186,13 @@ export async function runToolLoop(
 
   return { outcome: "too-many-rounds", proposals };
 
+  async function proceed(): Promise<boolean> {
+    return options.proceed === undefined || (await options.proceed());
+  }
+
   /**
    * One tool call, answered for the model; null when the host failed in a way
-   * that is no answer, which ends the turn.
+   * that is no answer, or the turn may not go on, which ends the turn.
    */
   async function call(use: ModelToolUse): Promise<ModelToolResult | null> {
     const action = byName.get(use.name);
@@ -211,6 +224,9 @@ export async function runToolLoop(
           // Checked by the assistant before the turn; a host that lost the
           // member since cannot hold the change, so nothing is called.
           return refused(use, { reason: "host-unsupported", retry: "never" });
+        }
+        if (!(await proceed())) {
+          return null;
         }
         const receipt = await actions.propose(request, action.name, use.input);
         proposal = {

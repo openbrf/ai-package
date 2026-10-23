@@ -101,9 +101,17 @@ than a week before, or dated more than a week ahead, is not run at all. So a
 retried turn proposes nothing twice, however late it is sent again, and within
 a turn a change the model asks for twice is proposed once.
 
-The record holds each pending change's id, action, address and expiry, and
-nothing anybody wrote: not the request, not the answer, not what a change
-would write, and not who asked. After an hour the pending changes are removed
+The request running a turn says in the record that it is alive before each
+call to the model and each change it proposes, and a turn counts as running
+for as long as it is heard from, however long that is. One not heard from in
+ten minutes died with its request: a later request finishes its record and is
+answered with what it had proposed, and the request, should it be only slow,
+finds the record finished and proposes nothing more.
+
+The record holds each pending change's id, action, address and expiry and,
+while the turn runs, when it was last heard from. It holds nothing anybody
+wrote: not the request, not the answer, not what a change would write, and not
+who asked. After an hour the pending changes are removed
 from it, leaving only the time the turn started, and after two weeks the
 record is deleted: by then the route refuses every request that could carry
 its id.
@@ -202,8 +210,9 @@ answer and the pending changes the turn proposed. A turn arrives again under
 the same `turnId` and `sentAt` when its answer was lost, and runs once: a
 repeat is answered with the changes the turn proposed, `in-progress` while it
 runs, or `expired` once those changes are no longer kept, an hour on. A turn
-whose `sentAt` is more than a week from the server's time runs not at all and
-is answered `expired`. It requires `site:manage`
+whose `sentAt` is more than a week from the server's time, before or after,
+runs not at all and is answered `expired`: it was first sent too long ago, or
+the clock of the device that sent it is off. It requires `site:manage`
 and refuses a connected app, whose token would put the turn's calls on `mcp`
 rather than `ai`.
 
