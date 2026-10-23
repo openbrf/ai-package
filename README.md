@@ -66,6 +66,9 @@ instance offers an AI package (ADR 0038 in openbrf/openbrf, "News and pages on
   If asked to, it proposes a mailing request (`news_request_mailing`), which
   records the request once confirmed and sends nothing. A board member then
   decides the mailing on the news screen.
+- **What the instance must offer.** The news and page actions on the `ai`
+  surface, which openbrf/openbrf#528 adds. On an instance without them the
+  host lists no tools to the assistant, which can then only answer in words.
 - **What it may reach.** The news and the pages: reading them, writing them,
   publishing and unpublishing them, and who may read them. Not deleting
   anything, the front page, the order of the pages or the menu: the instance
