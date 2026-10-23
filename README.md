@@ -190,8 +190,11 @@ reply they send is the one they write.
   people or the building now, the same day), `high` (within days), `normal`
   and `low`. An issue in the core has no priority, so this is advice to the
   board and is not stored.
-- **The reply is a draft**, in the language the reporter wrote in, which
-  promises no date, cost or measure and admits no fault. The package has no
+- **The reply is a draft**, in the language the reporter wrote in. The model
+  is instructed to promise no date, cost or measure and to admit no fault, but
+  the package does not check what the draft says: a reporter's text can talk
+  the model out of it. A board member reads the draft, and changes or drops
+  it, before anything like it reaches the reporter. The package has no
   permission to send mail or messages, and never asks for one.
 - **The model is given the issue and cannot act on it.** The package reads the
   issue and the issue types itself, before the model is called, with the
@@ -209,8 +212,11 @@ reply they send is the one they write.
   contains one. `test/injection-issues.ts` holds the reports the tests try
   this with.
 - **Bounded.** One triage makes at most 3 calls to the model, asking once more
-  when the model answers in text or its triage is refused. It is not started
-  when less than 40,000 tokens are left of the month.
+  when the model answers in text or its triage is refused, and uses at most
+  40,000 tokens. It is not started when less than that is left of the month,
+  and makes a call only when the most that call can use fits in what is left
+  of both: the previous call again, what was added since, counted as a token
+  per byte, and the longest answer allowed.
 - **Nothing is kept.** Not the issue, not the suggestions, not the reply.
 
 ### The route

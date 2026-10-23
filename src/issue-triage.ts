@@ -12,6 +12,7 @@ import {
   type ModelMessage,
   type ModelTool,
   type ModelToolUse,
+  type ModelUserMessage,
   totalTokens,
 } from "./provider.ts";
 
@@ -54,8 +55,19 @@ export const MAX_MODEL_CALLS = 3;
  * sends a few thousand tokens and gets back fewer. Three calls of that size
  * fit with room to spare; a triage is not asked when less than this is left
  * of the month.
+ *
+ * A call is made only when the most it can use fits in what is left of the
+ * budget and of the month, so a triage never passes either: see
+ * `callAtMost`.
  */
 export const TRIAGE_TOKEN_BUDGET = 40_000;
+
+/**
+ * What a provider adds to a request around the text the package sends, in
+ * tokens, counted generously: the roles, the framing of each block and the
+ * provider's own instructions on using tools.
+ */
+const FRAMING_TOKENS = 1_000;
 
 /** The most issue types offered to the model, in the board's order. */
 export const MAX_TYPES = 100;
@@ -126,10 +138,12 @@ export interface IssueTriage {
  * - `issue-not-found`: no issue by that id that this person may read. An issue
  *   handled only on the board's own screen is answered the same way.
  * - `too-little-left`: less is left of this month's limit than one triage may
- *   use, `TRIAGE_TOKEN_BUDGET`.
+ *   use, `TRIAGE_TOKEN_BUDGET`, or, after calls under way elsewhere, than the
+ *   triage's next call may use.
  * - `model-declined`: the model declined.
  * - `no-triage`: the model gave no triage the package could check within the
- *   calls or the tokens one triage may use.
+ *   calls one triage may make, or before the next call would no longer fit in
+ *   what is left of `TRIAGE_TOKEN_BUDGET`.
  */
 export type TriageRefusalReason =
   | "issues-unavailable"
@@ -276,11 +290,24 @@ export class IssueTriageAssistant {
       subjects: reporterOf(issue),
     };
 
+    // What the triage has used, its previous call, and what the conversation
+    // has gained since that call was sent.
     let used = 0;
+    let previous = 0;
+    let added =
+      tokensAtMost(SYSTEM_PROMPT) +
+      tokensAtMost(JSON.stringify(TRIAGE_TOOLS)) +
+      messageTokensAtMost(messages[0] as ModelUserMessage);
     let reminded = false;
     for (let call = 0; call < MAX_MODEL_CALLS; call++) {
-      if (used >= TRIAGE_TOKEN_BUDGET) {
-        break;
+      const most = callAtMost(previous, added);
+      if (used + most > TRIAGE_TOKEN_BUDGET) {
+        throw new TriageRefusal("no-triage");
+      }
+      // The month was checked for a whole triage before the reads; calls
+      // under way elsewhere may have used some of it since.
+      if (call > 0 && most > (await this.gateway.tokensLeft())) {
+        throw new TriageRefusal("too-little-left");
       }
       const response = await this.gateway.complete(
         {
@@ -293,7 +320,9 @@ export class IssueTriageAssistant {
         },
         disclosure,
       );
-      used += totalTokens(response.usage);
+      previous = totalTokens(response.usage);
+      used += previous;
+      added = 0;
       if (response.stop === "refusal") {
         throw new TriageRefusal("model-declined");
       }
@@ -310,7 +339,12 @@ export class IssueTriageAssistant {
           break;
         }
         reminded = true;
-        messages.push({ role: "user", content: FINISH_WITH_THE_TOOL });
+        const reminder: ModelUserMessage = {
+          role: "user",
+          content: FINISH_WITH_THE_TOOL,
+        };
+        messages.push(reminder);
+        added += messageTokensAtMost(reminder);
         continue;
       }
       // Every call answered, so the conversation can go on; only one of them
@@ -336,10 +370,12 @@ export class IssueTriageAssistant {
       if (triage !== null) {
         return triage;
       }
-      messages.push({
+      const answered: ModelUserMessage = {
         role: "user",
         content: results.filter((result) => result !== null),
-      });
+      };
+      messages.push(answered);
+      added += messageTokensAtMost(answered);
     }
     throw new TriageRefusal("no-triage");
   }
@@ -545,6 +581,33 @@ function checkTriage(
     },
     replyDraft: replyDraft as string,
   };
+}
+
+/**
+ * The most tokens the next call can use, counted as the monthly limit counts
+ * them, before it is made.
+ *
+ * `previous` is what the previous call used, or 0 before the first. It sent
+ * the conversation up to the model's answer and got that answer back, so the
+ * next call sends at most that again, which includes what the provider read
+ * from its cache, and `added`, what the conversation has gained since. Its
+ * answer is at most `MAX_OUTPUT_TOKENS`.
+ */
+function callAtMost(previous: number, added: number): number {
+  return previous + added + MAX_OUTPUT_TOKENS;
+}
+
+/**
+ * The most tokens a text can be: a token is at least one byte of the text in
+ * UTF-8, whatever the language or the characters.
+ */
+function tokensAtMost(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
+/** The most tokens one message adds to a request, with its framing. */
+function messageTokensAtMost(message: ModelUserMessage): number {
+  return tokensAtMost(JSON.stringify(message.content)) + FRAMING_TOKENS;
 }
 
 function refused(use: ModelToolUse, why: string) {

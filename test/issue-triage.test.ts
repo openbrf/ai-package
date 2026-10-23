@@ -9,12 +9,14 @@ import {
   TRIAGE_TOOL,
   TriageRefusal,
 } from "../src/issue-triage.ts";
-import type {
-  ModelAssistantMessage,
-  ModelResponse,
-  ModelToolResult,
-  ModelUserMessage,
+import {
+  type ModelAssistantMessage,
+  type ModelResponse,
+  type ModelToolResult,
+  type ModelUserMessage,
+  totalTokens,
 } from "../src/provider.ts";
+import { UsageMeter } from "../src/usage.ts";
 import { INJECTIONS } from "./injection-issues.ts";
 import { FakeProvider, type StandIn, standIn } from "./stand-in-host.ts";
 import {
@@ -36,6 +38,7 @@ const REQUEST = Object.freeze({ id: "the-route's-request" });
 interface Setup extends StandIn {
   queue: StandInIssues;
   provider: FakeProvider;
+  gateway: AiGateway;
   assistant: IssueTriageAssistant;
 }
 
@@ -53,6 +56,7 @@ function setup(
     ...stand,
     queue,
     provider,
+    gateway,
     assistant: new IssueTriageAssistant(stand.host, gateway),
   };
 }
@@ -94,6 +98,19 @@ const TRIAGE = {
   replyDraft:
     "Hej! Tack för din anmälan. Vi har tagit emot den och återkommer så snart vi kan.\n\nStyrelsen",
 };
+
+/** `response`, as a call that used `tokens` in all. */
+function costing(response: ModelResponse, tokens: number): ModelResponse {
+  return {
+    ...response,
+    usage: {
+      inputTokens: tokens - 300,
+      outputTokens: 300,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+  };
+}
 
 const triage = (fields: Record<string, unknown> = {}) =>
   use(TRIAGE_TOOL, { ...TRIAGE, ...fields });
@@ -367,6 +384,86 @@ describe("what the model's triage is held to", () => {
     expect(
       (await refusal(assistant.triage(REQUEST, LEAK.id, "sv"))).reason,
     ).toBe("no-triage");
+  });
+});
+
+describe("a triage's tokens", () => {
+  /** This month's use, as the limit counts it. */
+  async function monthUsed(stand: Setup): Promise<number> {
+    const { usage } = await new UsageMeter(stand.records).thisMonth();
+    return totalTokens(usage);
+  }
+
+  it("makes no call that could pass what is left of its budget", async () => {
+    const stand = setup({
+      settings: { monthlyTokenLimit: TRIAGE_TOKEN_BUDGET },
+    });
+    // Two triages refused back to the model, then one that stands: had the
+    // third call been made, the triage would have used 45,000 tokens.
+    stand.provider.answers.push(
+      costing(turn(triage({ typeId: "type-old" })), 15_000),
+      costing(turn(triage({ typeId: "type-old" })), 15_000),
+      costing(turn(triage()), 15_000),
+    );
+
+    expect(
+      (await refusal(stand.assistant.triage(REQUEST, LEAK.id, "sv"))).reason,
+    ).toBe("no-triage");
+    expect(stand.provider.calls).toHaveLength(2);
+    expect(await monthUsed(stand)).toBe(30_000);
+  });
+
+  it("asks again when the next call fits in what is left", async () => {
+    const stand = setup({
+      settings: { monthlyTokenLimit: TRIAGE_TOKEN_BUDGET },
+    });
+    stand.provider.answers.push(
+      costing(turn(triage({ typeId: "type-old" })), 8_000),
+      costing(turn(triage({ typeId: "type-old" })), 8_000),
+      costing(turn(triage()), 8_000),
+    );
+
+    const suggestions = await stand.assistant.triage(REQUEST, LEAK.id, "sv");
+
+    expect(suggestions.category.suggested?.id).toBe("type-water");
+    expect(stand.provider.calls).toHaveLength(3);
+    expect(await monthUsed(stand)).toBeLessThanOrEqual(TRIAGE_TOKEN_BUDGET);
+  });
+
+  it("stops when calls elsewhere used the rest of the month meanwhile", async () => {
+    const stand = setup({ settings: { monthlyTokenLimit: 100_000 } });
+    stand.provider.answers.push(
+      costing(turn(triage({ typeId: "type-old" })), 10_000),
+      turn(triage()),
+    );
+    const answer = stand.provider.complete.bind(stand.provider);
+    stand.provider.complete = async (call) => {
+      const response = await answer(call);
+      // Another assistant's call, counted while the triage's was answered.
+      await new UsageMeter(stand.records).record({
+        inputTokens: 85_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+      return response;
+    };
+
+    expect(
+      (await refusal(stand.assistant.triage(REQUEST, LEAK.id, "sv"))).reason,
+    ).toBe("too-little-left");
+    expect(stand.provider.calls).toHaveLength(1);
+  });
+
+  it("makes no call at all for an issue too large for the budget", async () => {
+    const stand = setup({
+      issues: [{ ...LEAK, description: "Det droppar. ".repeat(3_000) }],
+    });
+
+    expect(
+      (await refusal(stand.assistant.triage(REQUEST, LEAK.id, "sv"))).reason,
+    ).toBe("no-triage");
+    expect(stand.provider.calls).toEqual([]);
   });
 });
 
