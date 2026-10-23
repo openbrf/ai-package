@@ -39,6 +39,12 @@
     "providerFailed": "The language model gave no answer just now. Try again later.",
     "documentsUnavailable": "The assistant cannot read the document archive on this instance.",
     "modelDeclined": "The language model declined to answer this question.",
-    "noAnswer": "The assistant found no answer it could tie to a document. Ask again, perhaps more narrowly."
+    "noAnswer": "The assistant found no answer it could tie to a document. Ask again, perhaps more narrowly.",
+    "issueIdInvalid": "Name the issue to triage by its id.",
+    "issuesUnavailable": "The assistant cannot read the issue queue or the issue types on this instance.",
+    "issueNotFound": "There is no issue by that id that you can triage here.",
+    "triageTooLittleLeft": "Less is left of this month's limit for the AI package than one triage may use, {{budget}} tokens. Triage works again when the next month starts only if the monthly limit is at least {{budget}} tokens. A lower limit must be raised in the settings to at least that.",
+    "triageModelDeclined": "The language model declined to triage this issue.",
+    "noTriage": "The assistant could not put together suggestions for this issue. Try again."
   }
 }

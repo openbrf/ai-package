@@ -39,6 +39,12 @@
     "providerFailed": "Språkmodellen gav inget svar just nu. Försök igen senare.",
     "documentsUnavailable": "Assistenten kan inte läsa dokumentarkivet på den här installationen.",
     "modelDeclined": "Språkmodellen avböjde att svara på frågan.",
-    "noAnswer": "Assistenten hittade inget svar som den kunde knyta till ett dokument. Fråga igen, gärna mer avgränsat."
+    "noAnswer": "Assistenten hittade inget svar som den kunde knyta till ett dokument. Fråga igen, gärna mer avgränsat.",
+    "issueIdInvalid": "Ange med dess id vilket ärende förslagen ska gälla.",
+    "issuesUnavailable": "Assistenten kan inte läsa ärendekön eller ärendetyperna på den här instansen.",
+    "issueNotFound": "Det finns inget ärende med det id:t som du kan få förslag för här.",
+    "triageTooLittleLeft": "Det som återstår av månadens gräns för AI-paketet är mindre än vad förslagen för ett ärende får använda, {{budget}} token. Förslagen fungerar igen när nästa månad börjar bara om månadsgränsen är minst {{budget}} token. En lägre gräns måste höjas i inställningarna till minst det.",
+    "triageModelDeclined": "Språkmodellen avböjde att ge förslag för det här ärendet.",
+    "noTriage": "Assistenten kunde inte ta fram förslag för det här ärendet. Försök igen."
   }
 }
