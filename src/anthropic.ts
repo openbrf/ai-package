@@ -165,11 +165,17 @@ export function requestBody(
               ...tool.inputSchema,
               type: "object" as const,
             },
+            ...(tool.strict === true ? { strict: true } : {}),
           })),
         }),
     ...(request.effort === undefined
       ? {}
       : { output_config: { effort: request.effort } }),
+    // The API puts the mark on the last block it can cache, so a loop that
+    // sends its conversation again reads the earlier calls from the cache.
+    ...(request.cache === true
+      ? { cache_control: { type: "ephemeral" as const } }
+      : {}),
     ...(fallback ? { fallbacks: "default" as const } : {}),
   };
 }

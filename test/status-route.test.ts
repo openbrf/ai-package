@@ -33,7 +33,10 @@ afterEach(async () => {
   close = undefined;
 });
 
-async function readStatus(options: StandInOptions = {}): Promise<Response> {
+async function readStatus(
+  options: StandInOptions = {},
+  language?: string,
+): Promise<Response> {
   const { host } = standIn(options);
   const module = await createPlugin(host as unknown as PluginHost);
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -45,7 +48,10 @@ async function readStatus(options: StandInOptions = {}): Promise<Response> {
   await app.listen(0, "127.0.0.1");
   close = () => app.close();
   const { port } = app.getHttpServer().address() as { port: number };
-  return fetch(`http://127.0.0.1:${String(port)}/api/plugin/ai-package/status`);
+  return fetch(
+    `http://127.0.0.1:${String(port)}/api/plugin/ai-package/status`,
+    language === undefined ? {} : { headers: { "accept-language": language } },
+  );
 }
 
 describe("the status route", () => {
@@ -71,14 +77,31 @@ describe("the status route", () => {
     expect(JSON.stringify(body)).not.toContain("sk-ant-test-key");
   });
 
-  it("refuses a connected app, which learns nothing about the licence or the use", async () => {
-    const response = await readStatus({ connectedApp: true });
+  it.each([
+    [
+      "en-GB",
+      "A connected app cannot use the AI package. The board uses it on Open BRF's own screens.",
+    ],
+    [
+      "sv-SE",
+      "En ansluten app kan inte använda AI-paketet. Styrelsen använder det på Open BRF:s egna sidor.",
+    ],
+  ])(
+    "refuses a connected app, which learns nothing about the licence or the use (%s)",
+    async (language, message) => {
+      const response = await readStatus({ connectedApp: true }, language);
 
-    expect(response.status).toBe(403);
-    const text = await response.text();
-    expect(text).not.toContain("active");
-    expect(text).not.toContain("Anthropic");
-  });
+      expect(response.status).toBe(403);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({
+        statusCode: 403,
+        reason: "connected-app",
+        message,
+      });
+      expect(text).not.toContain("active");
+      expect(text).not.toContain("Anthropic");
+    },
+  );
 
   it("asks the host for the board's reading of the configuration", async () => {
     const { host } = standIn();

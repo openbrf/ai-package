@@ -243,6 +243,42 @@ describe("what is sent", () => {
     ]);
   });
 
+  it("marks a strict tool strict, and asks for the cache when a request may use it", async () => {
+    const { recipients, provider } = setup();
+    recipients.answer(200, message());
+    recipients.answer(200, message());
+    const tool = {
+      name: "give_answer",
+      description: "Gives the answer.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["answer"],
+        properties: { answer: { type: "string" } },
+      },
+    };
+
+    await provider.complete(
+      call({
+        request: {
+          ...REQUEST,
+          cache: true,
+          tools: [{ ...tool, strict: true }],
+        },
+      }),
+    );
+    await provider.complete(call({ request: { ...REQUEST, tools: [tool] } }));
+
+    expect(sentBody(recipients, 0)).toMatchObject({
+      tools: [{ name: "give_answer", strict: true }],
+      cache_control: { type: "ephemeral" },
+    });
+    expect(
+      (sentBody(recipients, 1).tools as Record<string, unknown>[])[0],
+    ).not.toHaveProperty("strict");
+    expect(sentBody(recipients, 1)).not.toHaveProperty("cache_control");
+  });
+
   it("hands a turn the provider sent back exactly as it came, reasoning included", async () => {
     const { recipients, provider } = setup();
     recipients.answer(
