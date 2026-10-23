@@ -96,7 +96,8 @@ never arrived, or that is still running, again under the same id and with the
 time it first sent it. The first request with an id claims it in the
 package's records before the model is called, and a later one runs nothing: it
 is answered with the changes the turn proposed, told that the turn is still
-running, or, after an hour, told that the turn is over. A turn first sent more
+running, or, once the turn has finished or died and an hour has passed since
+it started, told that the turn is over. A turn first sent more
 than a week before, or dated more than a week ahead, is not run at all. So a
 retried turn proposes nothing twice, however late it is sent again, and within
 a turn a change the model asks for twice is proposed once.
@@ -111,10 +112,13 @@ finds the record finished and proposes nothing more.
 The record holds each pending change's id, action, address and expiry and,
 while the turn runs, when it was last heard from. It holds nothing anybody
 wrote: not the request, not the answer, not what a change would write, and not
-who asked. After an hour the pending changes are removed
-from it, leaving only the time the turn started, and after two weeks the
-record is deleted: by then the route refuses every request that could carry
-its id.
+who asked. A turn still running keeps its record whatever its age. For a
+turn that has finished or died, the pending changes become eligible for removal
+an hour after it started, leaving only the time the turn started, and the
+record becomes eligible for deletion after two weeks: by then the route
+refuses every request that could carry its id. Both are done by a later
+request, which sweeps a few records each time, not by a timer, so a record can
+outlast these times; the answer "the turn is over" does not wait for the sweep.
 
 ### What is sent to the model
 
