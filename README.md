@@ -59,8 +59,16 @@ else.
 - **An agenda draft** (`POST /api/plugin/ai-package/meetings/:meetingId/agenda-draft`,
   with optional `instructions` and `language`). The draft starts from the
   agenda of the last meeting of the same kind that was held, or, for an
-  ordinary meeting without one, from the matters model bylaws usually list. It
-  is proposed as `meeting_set_agenda`, a pending change: nothing is written
+  ordinary meeting without one, from the matters model bylaws usually list.
+  The motions put to the meeting are read through `motion_meeting_list`: each
+  one's title and whether the board has acknowledged it, never who submitted
+  it. The draft gives each motion an item of its own, also for an
+  extraordinary meeting and without a request from the board, up to 80 motions: if
+  more were put to the meeting, the draft lists the first 80 and its note tells
+  the board to add the rest before confirming. On an instance without
+  that action, or for a board member who does not hold `motions:handle`, the
+  draft says where the motions belong instead. The draft is proposed as
+  `meeting_set_agenda`, a pending change: nothing is written
   until the board member confirms it on the platform's own screen, at the
   `path` the answer gives, and they can reject it there. The proposal names the
   agenda it was drafted against, so a draft confirmed after somebody rewrote the
@@ -127,9 +135,9 @@ the provider's answer and that record; a refused write fails the call.
 
 The assistants send the association's text to Anthropic: issue reports,
 messages from residents and the board's own drafts. Meeting support sends a
-meeting's agenda, its decisions as totals, the notice's time and place, and the
-board member's request or notes, which can name the members who spoke or were
-elected. That text can name residents and their apartments, and residents
+meeting's agenda, its decisions as totals, the notice's time and place, the
+titles of the motions put to it, and the board member's request or notes,
+which can name the members who spoke or were elected. That text can name residents and their apartments, and residents
 sometimes write about their health. The manifest declares this for the board to read on the consent screen
 before the package is installed: the personal-data categories `name`,
 `apartment`, `freeText` and `health`, and the one recipient that receives them.
