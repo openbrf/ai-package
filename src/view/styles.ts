@@ -106,6 +106,24 @@ export const styles = {
     borderRadius: "var(--obrf-radius-control)",
     resize: "vertical",
   },
+  select: {
+    minHeight: TOUCH,
+    font: "inherit",
+    fontSize: "0.9375rem",
+    padding: "0.25rem 0.75rem",
+    color: "var(--obrf-text-primary)",
+    background: "var(--obrf-surface-page)",
+    border: "1px solid var(--obrf-border-strong)",
+    borderRadius: "var(--obrf-radius-control)",
+  },
+  // An agenda's items keep their numbers: they are its running order.
+  items: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.25rem",
+    margin: 0,
+    paddingLeft: "1.5rem",
+  },
   toolbar: {
     display: "flex",
     flexWrap: "wrap",

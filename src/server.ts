@@ -36,10 +36,10 @@ import {
 } from "./document-assistant.ts";
 import { AiGateway, AiRefusal, type AiStatus } from "./gateway.ts";
 import type { AiPackageHost } from "./host-contract.ts";
+import { MAX_INSTRUCTIONS_LENGTH, MAX_NOTES_LENGTH } from "./meeting-limits.ts";
 import {
   type AgendaDraft,
-  MAX_INSTRUCTIONS_LENGTH,
-  MAX_NOTES_LENGTH,
+  type MeetingChoices,
   MeetingSupport,
   MeetingSupportRefusal,
   type MinutesDraft,
@@ -58,8 +58,8 @@ import {
  * board's routes: `status`, which the board's screen reads (the licence
  * finding, the provider and model, whether a key is entered, and this month's
  * use against the limit), `documents/ask`, the document assistant, the site
- * and news assistant's turns, and meeting support's two drafts for a general
- * meeting, the agenda and the minutes.
+ * and news assistant's turns, and meeting support: the meetings to choose
+ * from, and its two drafts for a general meeting, the agenda and the minutes.
  *
  * The controllers take no constructor arguments: they close over the host
  * object instead. The bundler that builds this file does not emit the
@@ -290,6 +290,20 @@ export const createPlugin: PluginModuleFactory = (
   @Controller("meetings")
   @SetMetadata(REQUIRED_CAPABILITIES, ["meetings:manage"])
   class MeetingSupportController {
+    /** The meetings the board member can ask a draft for. */
+    @Get()
+    async list(@Req() request: ActionRequest): Promise<MeetingChoices> {
+      const refused = callerRefusal(request, languageFor(request, undefined));
+      if (refused !== null) {
+        throw refused;
+      }
+      try {
+        return await meetings.meetings(request);
+      } catch (error) {
+        answered(error);
+      }
+    }
+
     /**
      * Drafts the agenda and proposes it. Nothing is written until the board
      * member confirms the pending change at the path the answer gives.

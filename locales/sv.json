@@ -67,6 +67,77 @@
       "forbidden": "Du har inte behörighet att ändra föreningens nyheter och sidor."
     }
   },
+  "meetings": {
+    "heading": "Föreningsstämma",
+    "intro": "Låt assistenten föreslå en dagordning eller skriva ett utkast till protokoll för en föreningsstämma. Ur Open BRF läser den stämmans dagordning, besluten med röstsiffrorna och kallelsens tid och plats, men aldrig vem som var där eller hur någon röstade.",
+    "loading": "Läser stämmorna …",
+    "reload": "Försök igen",
+    "none": "Föreningen har inte planerat in någon stämma än. Planera in den under Stämmor först.",
+    "kind": {
+      "ORDINARY": "Ordinarie föreningsstämma {{date}}",
+      "EXTRAORDINARY": "Extra föreningsstämma {{date}}"
+    },
+    "state": {
+      "arranged": "{{meeting}} (under planering)",
+      "summoned": "{{meeting}} (kallelsen skickad)",
+      "held": "{{meeting}} (hållen)"
+    },
+    "agenda": {
+      "heading": "Förslag till dagordning",
+      "intro": "Assistenten utgår från dagordningen vid den senaste stämman av samma slag och ger varje motion till stämman som du kan läsa en egen punkt. Förslaget läggs fram som en väntande ändring: dagordningen ändras inte förrän du har läst och bekräftat det under Väntande ändringar.",
+      "noneArranged": "Ingen stämma är under planering. En dagordning kan bara föreslås för en stämma som varken har kallats till eller antecknats som hållen.",
+      "meetingLabel": "Stämma",
+      "requestLabel": "Önskemål (frivilligt)",
+      "requestHint": "Till exempel vilka ärenden en extra stämma ska behandla. Skriv inga personnummer.",
+      "submit": "Föreslå dagordning",
+      "working": "Assistenten skriver dagordningen …",
+      "resultHeading": "Förslag till dagordning för {{meeting}}",
+      "noteHeading": "Assistentens kommentar",
+      "confirmThere": "Dagordningen ändras inte förrän du har bekräftat förslaget under Väntande ändringar. Där kan du också avvisa det.",
+      "open": "Läs och bekräfta dagordningen",
+      "expires": "Förfaller {{date}}",
+      "pendingChanges": "Öppna Väntande ändringar"
+    },
+    "minutes": {
+      "heading": "Utkast till protokoll",
+      "intro": "Klistra in dina anteckningar från stämman. Assistenten skriver ett utkast till protokoll, punkt för punkt, med besluten som de är antecknade. Utkastet sparas ingenstans: kopiera det, rätta det och låt det justeras och arkiveras som vanligt.",
+      "meetingLabel": "Stämma",
+      "notesLabel": "Dina anteckningar",
+      "submit": "Skriv utkast till protokoll",
+      "working": "Assistenten skriver utkastet …",
+      "resultHeading": "Utkast till protokoll för {{meeting}}",
+      "cutShort": "Utkastet blev för långt och slutar mitt i. Skriv resten själv utifrån anteckningarna.",
+      "notesChanged": "Du har ändrat anteckningarna sedan utkastet skrevs.",
+      "copy": "Kopiera utkastet",
+      "copied": "Utkastet är kopierat.",
+      "copyFailed": "Utkastet kunde inte kopieras. Markera texten och kopiera den själv.",
+      "notKept": "Utkastet finns bara här, tills du lämnar sidan."
+    },
+    "error": {
+      "listUnanswered": "Stämmorna kunde inte läsas just nu. Kontrollera anslutningen och försök igen.",
+      "agendaUnanswered": "Inget svar kom tillbaka. Förslaget kan ändå ha lagts fram, så titta under Väntande ändringar innan du ber om ett nytt.",
+      "unanswered": "Inget svar kom tillbaka. Kontrollera anslutningen och försök igen.",
+      "forbidden": "Du har inte behörighet att hantera föreningsstämmor.",
+      "failed": "Något gick fel. Försök igen om en stund."
+    },
+    "refused": {
+      "host-unsupported": "Den här Open BRF-installationen saknar det som stämmostödet behöver. Uppdatera installationen för att använda det.",
+      "connected-app": "En ansluten app kan inte använda stämmostödet.",
+      "entitlement-required": "Föreningen har ingen giltig licens för AI-paketet.",
+      "provider-not-configured": "Ingen API-nyckel är angiven i AI-paketets inställningar.",
+      "usage-limit-reached": "Månadens gräns för AI-paketet är nådd. Assistenten kan användas igen när nästa månad börjar, eller när gränsen höjs i inställningarna.",
+      "rate-limited": "För många förfrågningar just nu. Försök igen om en minut.",
+      "rate-limited-after_one": "För många förfrågningar just nu. Försök igen om {{count}} sekund.",
+      "rate-limited-after_other": "För många förfrågningar just nu. Försök igen om {{count}} sekunder.",
+      "provider-failed": "Språkmodellen svarade inte. Försök igen om en stund.",
+      "notice-already-issued": "Kallelsen till stämman är redan skickad, så dagordningen kan inte längre ändras.",
+      "meeting-already-held": "Stämman är redan antecknad som hållen, så dagordningen kan inte längre ändras.",
+      "no-draft": "Assistenten gav inget utkast som gick att använda, och ingenting har lagts fram. Försök igen.",
+      "personal-identity-number": "Det du skrev eller stämmans uppgifter, till exempel dagordningen eller kallelsen, innehåller ett personnummer. Personnummer skickas inte till språkmodellen. Ta bort det och försök igen.",
+      "invalid-body": "Förfrågan kunde inte läsas. Kontrollera texten och försök igen.",
+      "meeting-not-found": "Stämman finns inte längre. Ladda om sidan och välj en annan."
+    }
+  },
   "cli": {
     "packageCheckPasses_one": "{{tarball}}: paketkontrollen godkänner paketet ({{count}} fil).",
     "packageCheckPasses_other": "{{tarball}}: paketkontrollen godkänner paketet ({{count}} filer).",

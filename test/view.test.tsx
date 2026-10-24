@@ -43,6 +43,7 @@ afterEach(() => {
 });
 
 const ROUTE = "/api/plugin/ai-package/assistants/site/turns";
+const MEETINGS_ROUTE = "/api/plugin/ai-package/meetings";
 
 const PROPOSED: SiteTurnResponse = {
   outcome: "answered",
@@ -68,6 +69,10 @@ interface Sent {
 function serve(...answers: (SiteTurnResponse | number | Error)[]) {
   const sent: Sent[] = [];
   const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+    if (input === MEETINGS_ROUTE) {
+      // Meeting support, beside the assistant, lists no meetings here.
+      return Response.json({ meetings: [], more: false });
+    }
     expect(input).toBe(ROUTE);
     sent.push(JSON.parse(String(init?.body)) as Sent);
     const next = answers.shift();
@@ -85,12 +90,19 @@ function serve(...answers: (SiteTurnResponse | number | Error)[]) {
   return { fetch, sent };
 }
 
-function show() {
-  return render(
+/** The view, once meeting support beside the assistant has read its list. */
+async function show() {
+  const view = render(
     <I18nextProvider i18n={i18n}>
       <View />
     </I18nextProvider>,
   );
+  await waitFor(() => {
+    expect(
+      screen.queryByText(/^(Läser stämmorna|Reading the meetings)/),
+    ).toBeNull();
+  });
+  return view;
 }
 
 function ask(text: string): void {
@@ -101,9 +113,9 @@ function ask(text: string): void {
 }
 
 describe("the assistant's view", () => {
-  it("says that nothing changes before the person confirms, and that it mails nobody", () => {
+  it("says that nothing changes before the person confirms, and that it mails nobody", async () => {
     serve();
-    show();
+    await show();
 
     expect(screen.getByRole("heading", { name: "AI-assistent" })).toBeTruthy();
     expect(
@@ -116,7 +128,7 @@ describe("the assistant's view", () => {
 
   it("sends what the person asks, and links each proposed change to the screen that confirms it", async () => {
     const { sent } = serve(PROPOSED);
-    show();
+    await show();
 
     ask("Skriv en nyhet om städdagen.");
 
@@ -147,20 +159,23 @@ describe("the assistant's view", () => {
 
   it("sends one turn at a time", async () => {
     let answer = (_response: Response): void => undefined;
-    const fetch = vi.fn(
-      () =>
-        new Promise<Response>((resolve) => {
-          answer = resolve;
-        }),
+    const fetch = vi.fn((input: string) =>
+      input === MEETINGS_ROUTE
+        ? Promise.resolve(Response.json({ meetings: [], more: false }))
+        : new Promise<Response>((resolve) => {
+            answer = resolve;
+          }),
     );
     vi.stubGlobal("fetch", fetch);
-    show();
+    await show();
 
     ask("Skriv en nyhet.");
     expect(await screen.findByRole("status")).toBeTruthy();
     ask("Och en till.");
 
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls.filter(([input]) => input === ROUTE)).toHaveLength(
+      1,
+    );
     expect(
       (screen.getByRole("button", { name: "Skicka" }) as HTMLButtonElement)
         .disabled,
@@ -183,7 +198,7 @@ describe("the assistant's view", () => {
       outcome: "repeated",
       proposals: PROPOSED.outcome === "answered" ? PROPOSED.proposals : [],
     });
-    show();
+    await show();
 
     ask("Skriv en nyhet om städdagen.");
     expect((await screen.findByRole("alert")).textContent).toBe(
@@ -210,7 +225,7 @@ describe("the assistant's view", () => {
         proposals: PROPOSED.outcome === "answered" ? PROPOSED.proposals : [],
       },
     );
-    show();
+    await show();
 
     ask("Skriv en nyhet om städdagen.");
     fireEvent.click(await screen.findByRole("button", { name: "Försök igen" }));
@@ -241,7 +256,7 @@ describe("the assistant's view", () => {
 
   it("says a turn it cannot answer is over, and takes the next question", async () => {
     serve({ outcome: "expired" });
-    show();
+    await show();
 
     ask("Skriv en nyhet om städdagen.");
 
@@ -260,9 +275,9 @@ describe("the assistant's view", () => {
     ).toBe("/app/pending-changes");
   });
 
-  it("always links the pending changes screen, before anything is asked", () => {
+  it("always links the pending changes screen, before anything is asked", async () => {
     serve();
-    show();
+    await show();
 
     expect(
       screen
@@ -273,7 +288,7 @@ describe("the assistant's view", () => {
 
   it("keeps the pending changes link after a proposal, a new conversation and a remount", async () => {
     serve(PROPOSED);
-    const first = show();
+    const first = await show();
     ask("Skriv en nyhet om städdagen.");
     await screen.findByRole("link", {
       name: "Läs och bekräfta: Skapa en nyhet",
@@ -293,7 +308,7 @@ describe("the assistant's view", () => {
     ).toBe("/app/pending-changes");
 
     first.unmount();
-    show();
+    await show();
     expect(
       screen
         .getByRole("link", { name: "Öppna Väntande ändringar" })
@@ -312,7 +327,7 @@ describe("the assistant's view", () => {
       },
       { outcome: "answered", answer: "Klart.", proposals: [] },
     );
-    show();
+    await show();
 
     ask("Skriv en nyhet om städdagen.");
     await screen.findByRole("link", { name: /^Läs och bekräfta/ });
@@ -338,7 +353,7 @@ describe("the assistant's view", () => {
 
   it("says so when the person may not change the news and the pages", async () => {
     serve(403);
-    show();
+    await show();
 
     ask("Skriv en nyhet.");
 
@@ -350,7 +365,7 @@ describe("the assistant's view", () => {
 
   it("starts over with an empty conversation", async () => {
     serve(PROPOSED);
-    show();
+    await show();
     ask("Skriv en nyhet.");
     await screen.findByRole("link", { name: /^Läs och bekräfta/ });
 
@@ -361,7 +376,7 @@ describe("the assistant's view", () => {
 
   it("gives every button and link a touch target of at least 44px", async () => {
     serve(PROPOSED);
-    show();
+    await show();
     ask("Skriv en nyhet.");
     const link = await screen.findByRole("link", { name: /^Läs och bekräfta/ });
 
@@ -374,7 +389,7 @@ describe("the assistant's view", () => {
     serve(PROPOSED);
     await i18n.changeLanguage("en");
     try {
-      show();
+      await show();
       fireEvent.change(
         screen.getByLabelText("What do you want to write or change?"),
         { target: { value: "Write a news item." } },

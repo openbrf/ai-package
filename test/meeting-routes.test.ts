@@ -70,6 +70,7 @@ async function serve(
       body: unknown,
       headers?: Record<string, string>,
     ) => Promise<Response>;
+    list: () => Promise<Response>;
   }
 > {
   const stand = standIn(options);
@@ -101,7 +102,9 @@ async function serve(
         body: JSON.stringify(body),
       },
     );
-  return { ...stand, post };
+  const list = () =>
+    fetch(`http://127.0.0.1:${String(port)}/api/plugin/ai-package/meetings`);
+  return { ...stand, post, list };
 }
 
 function sentBody(stand: StandIn): Record<string, unknown> {
@@ -220,10 +223,95 @@ describe("the meeting support routes", () => {
       });
 
       expect(response.status).toBe(403);
+      expect((await response.json()).reason).toBe("connected-app");
       expect(stand.meetingActions.invoked).toHaveLength(0);
       expect(stand.recipients.sent).toHaveLength(0);
     },
   );
+
+  it.each(["agenda-draft", "minutes-draft", "list"])(
+    "answer %s on a host that cannot say who sent a request as one older than the package",
+    async (route) => {
+      const stand = await serve({ without: ["actions.client"] });
+
+      const response =
+        route === "list"
+          ? await stand.list()
+          : await stand.post(`${MEETING.id}/${route}`, {
+              notes: "Anteckningar",
+            });
+
+      expect(response.status).toBe(501);
+      expect((await response.json()).reason).toBe("host-unsupported");
+      expect(stand.meetingActions.invoked).toHaveLength(0);
+      expect(stand.recipients.sent).toHaveLength(0);
+    },
+  );
+
+  it("list the meetings for the board member to choose from, and send nothing anywhere", async () => {
+    const stand = await serve();
+    stand.meetingActions.answers.set("meeting_list", () => ({
+      meetings: [
+        { ...MEETING, agenda: undefined, notice: undefined },
+        {
+          id: "meeting-2026",
+          kind: "ORDINARY",
+          heldOn: "2026-05-13",
+          concludedAt: "2026-05-13T19:02:00.000Z",
+          summoned: true,
+          agendaItemCount: 12,
+        },
+      ],
+      more: true,
+    }));
+
+    const response = await stand.list();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      meetings: [
+        {
+          id: "meeting-2027",
+          kind: "ORDINARY",
+          heldOn: "2027-05-20",
+          summoned: false,
+          held: false,
+        },
+        {
+          id: "meeting-2026",
+          kind: "ORDINARY",
+          heldOn: "2026-05-13",
+          summoned: true,
+          held: true,
+        },
+      ],
+      more: true,
+    });
+    expect(stand.meetingActions.invoked).toEqual([
+      { name: "meeting_list", input: { limit: 50 } },
+    ]);
+    expect(stand.recipients.sent).toHaveLength(0);
+  });
+
+  it("refuse the list on a host without meeting_list", async () => {
+    const stand = await serve();
+    stand.meetingActions.offered = ["meeting_get"];
+
+    const response = await stand.list();
+
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({ reason: "host-unsupported" });
+    expect(stand.meetingActions.invoked).toHaveLength(0);
+  });
+
+  it("refuse the list to a connected app", async () => {
+    const stand = await serve({ connectedApp: true });
+
+    const response = await stand.list();
+
+    expect(response.status).toBe(403);
+    expect(stand.meetingActions.invoked).toHaveLength(0);
+  });
 
   it("answer an agenda draft for a summoned meeting with a conflict", async () => {
     const stand = await serve({}, { ...MEETING, summoned: true });

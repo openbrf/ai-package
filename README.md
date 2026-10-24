@@ -296,19 +296,49 @@ else.
   decisions as recorded. The draft is handed back and kept nowhere, here or in
   the archive. The board corrects it, has it signed and files it as before.
 
+The meetings to choose from are listed by `GET /api/plugin/ai-package/meetings`,
+the most recent fifty as `meeting_list` gives them, each with its kind, its day,
+and whether its notice has been issued (`summoned`) and it has been recorded as
+held (`held`). Nothing in the list is sent to the model.
+
 A draft is written in the language the body names, `sv` or `en`, or else the
-request's. A connected app is refused both routes. A refusal answers with a
-`reason`: `notice-already-issued` or `meeting-already-held` (409), `no-draft`
+request's. A connected app is refused every route (`connected-app`, 403), and
+an instance without `host.actions.client`, which cannot say whether a connected
+app sent the request, is answered `host-unsupported` (501) before anything is
+read. A refusal answers with a `reason`: `notice-already-issued` or `meeting-already-held` (409), `no-draft`
 when the model declined or gave no usable draft (422),
 `personal-identity-number` when the request, the notes or the meeting's record
 (the agenda's titles, the previous meeting's agenda, the notice's place and its
 digital participation) hold one, which is then not sent anywhere (400), the
 gateway's reasons (see above), and `host-unsupported` (501) on an instance without
+the meeting actions a route reads or, for an agenda draft, without
 `meeting_set_agenda` or pending changes. The platform's own refusals, such as
 `meeting-not-found`, come back as the platform gives them.
 
-The routes are the server half of meeting support. The board's screen for them
-comes with the package's first view.
+### The screen
+
+Meeting support is part of the package's view, under the site and news
+assistant (`/app/plugin/ai-package`).
+
+- **An agenda draft** is offered for a meeting being arranged: one whose notice
+  has not been issued and that has not been recorded as held. The board member
+  chooses the meeting, may add a request, and asks for the draft. The view
+  shows the drafted items and the model's note, and links to the pending
+  change at the `path` the answer gives, where the board member confirms or
+  rejects it. The view has no confirm button. When no answer came back, the
+  view says the draft may have been proposed all the same and links the
+  pending changes screen, so the board member looks there before asking again.
+- **A minutes draft** is offered for any listed meeting, the latest one held
+  first. The board member pastes their notes and gets the draft as text to
+  copy, with a sentence when it was cut short (`complete: false`). The view
+  holds the draft only while it is open.
+- One draft of each kind is asked for at a time, and its button stays disabled
+  while one is on its way. An answer is shown only if it belongs to the latest
+  request of its kind, and with the meeting it was asked for, so an answer that
+  arrives late never takes the place of a newer one. A refusal clears once the
+  board member chooses another meeting or changes what they wrote.
+- Every refusal reason above has a sentence of its own in Swedish and English,
+  and a refusal the view does not know is answered with a general one.
 
 ## Settings
 

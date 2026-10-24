@@ -83,17 +83,31 @@ export interface AgendaDraft {
   };
 }
 
+/**
+ * The meetings the board's screen offers to draft for, as `meeting_list`
+ * answers with them: the one furthest ahead first. `summoned` and `held` say
+ * which can still have their agenda drafted: one with neither.
+ */
+export interface MeetingChoices {
+  readonly meetings: readonly {
+    readonly id: string;
+    readonly kind: "ORDINARY" | "EXTRAORDINARY";
+    /** The day it is held, as an ISO date. */
+    readonly heldOn: string;
+    /** Whether the notice is out, which settles the agenda. */
+    readonly summoned: boolean;
+    /** Whether it is recorded as held. */
+    readonly held: boolean;
+  }[];
+  /** Whether older meetings were left out. */
+  readonly more: boolean;
+}
+
 export interface MinutesDraft {
   readonly draft: string;
   /** False when the draft was cut short at the length the package allows. */
   readonly complete: boolean;
 }
-
-/** The longest notes the package takes, about twenty pages of text. */
-export const MAX_NOTES_LENGTH = 50_000;
-
-/** The longest request the board member adds to an agenda draft. */
-export const MAX_INSTRUCTIONS_LENGTH = 2_000;
 
 /** The most items an agenda holds, as `meeting_set_agenda` takes them. */
 const MAX_AGENDA_ITEMS = 100;
@@ -164,6 +178,20 @@ const meetingListSchema = z.object({
   more: z.boolean(),
 });
 
+/** What `meeting_list` answers with, as the board's screen lists it. */
+const meetingChoicesSchema = z.object({
+  meetings: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(["ORDINARY", "EXTRAORDINARY"]),
+      heldOn: z.string(),
+      concludedAt: z.string().nullable(),
+      summoned: z.boolean(),
+    }),
+  ),
+  more: z.boolean(),
+});
+
 /**
  * What `motion_meeting_list` answers with, as far as meeting support reads it.
  * The motion's id is not read: the model has no use for it.
@@ -228,6 +256,29 @@ export class MeetingSupport {
     private readonly host: AiPackageHost,
     private readonly gateway: AiGateway,
   ) {}
+
+  /**
+   * The most recent fifty meetings, for the board member to choose the one a
+   * draft is for. Nothing in it goes to the model.
+   */
+  async meetings(request: ActionRequest): Promise<MeetingChoices> {
+    await this.requireActions(request, ["meeting_list"]);
+    const listed = meetingChoicesSchema.parse(
+      await this.host.actions.invoke(request, "meeting_list", {
+        limit: MEETINGS_PER_LIST,
+      }),
+    );
+    return {
+      meetings: listed.meetings.map((meeting) => ({
+        id: meeting.id,
+        kind: meeting.kind,
+        heldOn: meeting.heldOn,
+        summoned: meeting.summoned,
+        held: meeting.concludedAt !== null,
+      })),
+      more: listed.more,
+    };
+  }
 
   /**
    * Drafts the meeting's agenda and proposes it for the board member to

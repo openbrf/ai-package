@@ -67,6 +67,77 @@
       "forbidden": "You may not change the association's news and pages."
     }
   },
+  "meetings": {
+    "heading": "General meeting",
+    "intro": "Have the assistant propose an agenda or write a draft of the minutes for a general meeting. From Open BRF it reads the meeting's agenda, the decisions with their vote totals and the notice's time and place, but never who was there or how anybody voted.",
+    "loading": "Reading the meetings …",
+    "reload": "Try again",
+    "none": "The association has not arranged a general meeting yet. Arrange it under General meetings first.",
+    "kind": {
+      "ORDINARY": "Ordinary general meeting {{date}}",
+      "EXTRAORDINARY": "Extraordinary general meeting {{date}}"
+    },
+    "state": {
+      "arranged": "{{meeting}} (being arranged)",
+      "summoned": "{{meeting}} (notice issued)",
+      "held": "{{meeting}} (held)"
+    },
+    "agenda": {
+      "heading": "Agenda draft",
+      "intro": "The assistant starts from the agenda of the last meeting of the same kind and gives each motion put to the meeting that you can read an item of its own. The draft is proposed as a pending change: the agenda does not change until you have read and confirmed it under Pending changes.",
+      "noneArranged": "No general meeting is being arranged. An agenda can only be proposed for a meeting whose notice has not been issued and that has not been recorded as held.",
+      "meetingLabel": "General meeting",
+      "requestLabel": "Request (optional)",
+      "requestHint": "For example, the matters an extraordinary meeting is to deal with. Do not write any personal identity numbers.",
+      "submit": "Propose an agenda",
+      "working": "The assistant is writing the agenda …",
+      "resultHeading": "Agenda draft for {{meeting}}",
+      "noteHeading": "The assistant's note",
+      "confirmThere": "The agenda does not change until you have confirmed the draft under Pending changes. You can also reject it there.",
+      "open": "Read and confirm the agenda",
+      "expires": "Expires {{date}}",
+      "pendingChanges": "Open Pending changes"
+    },
+    "minutes": {
+      "heading": "Minutes draft",
+      "intro": "Paste your notes from the meeting. The assistant writes a draft of the minutes, item by item, with the decisions as recorded. The draft is kept nowhere: copy it, correct it, and have it checked and filed as before.",
+      "meetingLabel": "General meeting",
+      "notesLabel": "Your notes",
+      "submit": "Write a minutes draft",
+      "working": "The assistant is writing the draft …",
+      "resultHeading": "Minutes draft for {{meeting}}",
+      "cutShort": "The draft ran too long and stops partway. Write the rest yourself from the notes.",
+      "notesChanged": "You have changed the notes since the draft was written.",
+      "copy": "Copy the draft",
+      "copied": "The draft is copied.",
+      "copyFailed": "The draft could not be copied. Select the text and copy it yourself.",
+      "notKept": "The draft is only here, until you leave the page."
+    },
+    "error": {
+      "listUnanswered": "The meetings could not be read just now. Check the connection and try again.",
+      "agendaUnanswered": "No answer came back. The draft may have been proposed all the same, so look under Pending changes before you ask for another.",
+      "unanswered": "No answer came back. Check the connection and try again.",
+      "forbidden": "You are not permitted to manage general meetings.",
+      "failed": "Something went wrong. Try again in a while."
+    },
+    "refused": {
+      "host-unsupported": "This Open BRF instance lacks what meeting support needs. Update the instance to use it.",
+      "connected-app": "A connected app cannot use meeting support.",
+      "entitlement-required": "The association has no valid licence for the AI package.",
+      "provider-not-configured": "No API key is entered in the AI package's settings.",
+      "usage-limit-reached": "This month's limit for the AI package is reached. The assistant can be used again when next month begins, or when the limit is raised in the settings.",
+      "rate-limited": "Too many requests just now. Try again in a minute.",
+      "rate-limited-after_one": "Too many requests just now. Try again in {{count}} second.",
+      "rate-limited-after_other": "Too many requests just now. Try again in {{count}} seconds.",
+      "provider-failed": "The language model did not answer. Try again in a while.",
+      "notice-already-issued": "The notice of the meeting has been issued, so its agenda can no longer change.",
+      "meeting-already-held": "The meeting is recorded as held, so its agenda can no longer change.",
+      "no-draft": "The assistant gave no draft that could be used, and nothing was proposed. Try again.",
+      "personal-identity-number": "What you wrote or the meeting's record, such as the agenda or the notice, holds a personal identity number. Personal identity numbers are not sent to the language model. Remove it and try again.",
+      "invalid-body": "The request could not be read. Check the text and try again.",
+      "meeting-not-found": "The meeting no longer exists. Reload the page and choose another."
+    }
+  },
   "cli": {
     "packageCheckPasses_one": "{{tarball}}: the package check passes ({{count}} file).",
     "packageCheckPasses_other": "{{tarball}}: the package check passes ({{count}} files).",

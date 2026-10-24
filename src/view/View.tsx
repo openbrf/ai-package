@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
+import MeetingSupport from "./MeetingSupport.tsx";
 import SiteAssistant from "./SiteAssistant.tsx";
 import { NAMESPACE, styles } from "./styles.ts";
 
@@ -19,6 +20,7 @@ export default function AiPackageView(): ReactElement {
     <section style={styles.panel}>
       <h2 style={styles.heading}>{t("view.title")}</h2>
       <SiteAssistant />
+      <MeetingSupport />
     </section>
   );
 }
