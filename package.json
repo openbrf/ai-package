@@ -48,8 +48,8 @@
         "en": "The board's running of the association: finding answers in the association's own documents and handling issues sooner."
       },
       "retention": {
-        "sv": "AI-paketet sparar ingen text: varken frågan, det som lästes, ärendet eller förslagen. Det sparar bara antal token per anrop och månad samt antal anrop under den aktuella minuten, som inte pekar ut någon. Hur länge Anthropic behåller det som skickas styrs av föreningens eget avtal med Anthropic.",
-        "en": "The AI package keeps no text: not the question, what was read, the issue or the suggestions. It keeps only token counts per call and month and the current minute's call count, which identify nobody. How long Anthropic keeps what is sent is set by the association's own agreement with Anthropic."
+        "sv": "AI-paketet sparar ingen text: varken frågan, det som lästes, ärendet eller förslagen. Det sparar bara antal token per anrop och månad, månadens antal anrop, antal anrop under den aktuella minuten och de interna nycklar som visar vilka anrop månadens summa redan räknat. Inget av det pekar ut någon. Hur länge Anthropic behåller det som skickas styrs av föreningens eget avtal med Anthropic.",
+        "en": "The AI package keeps no text: not the question, what was read, the issue or the suggestions. It keeps only token counts per call and month, the month's call total, the current minute's call count and the internal keys of the calls the monthly total has counted. None of it identifies anybody. How long Anthropic keeps what is sent is set by the association's own agreement with Anthropic."
       },
       "dataSubjects": [
         "members",
