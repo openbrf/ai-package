@@ -20,6 +20,7 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "eval": "vitest run --config eval/vitest.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:package": "node scripts/check-package.mjs"
