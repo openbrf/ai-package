@@ -73,8 +73,8 @@ async function serve(
   }
 > {
   const stand = standIn(options);
-  stand.actions.answers.set("meeting_get", () => meeting);
-  stand.actions.answers.set("meeting_list", () => ({
+  stand.meetingActions.answers.set("meeting_get", () => meeting);
+  stand.meetingActions.answers.set("meeting_list", () => ({
     meetings: [meeting],
     more: false,
   }));
@@ -146,7 +146,7 @@ describe("the meeting support routes", () => {
         path: "/app/pending-changes/pending-1",
       },
     });
-    expect(stand.actions.proposed[0]?.name).toBe("meeting_set_agenda");
+    expect(stand.meetingActions.proposed[0]?.name).toBe("meeting_set_agenda");
     expect(sentBody(stand).output_config).toMatchObject({
       format: { type: "json_schema" },
     });
@@ -190,7 +190,7 @@ describe("the meeting support routes", () => {
       draft: "PROTOKOLL",
       complete: true,
     });
-    expect(stand.actions.proposed).toHaveLength(0);
+    expect(stand.meetingActions.proposed).toHaveLength(0);
   });
 
   it.each([
@@ -220,7 +220,7 @@ describe("the meeting support routes", () => {
       });
 
       expect(response.status).toBe(403);
-      expect(stand.actions.invoked).toHaveLength(0);
+      expect(stand.meetingActions.invoked).toHaveLength(0);
       expect(stand.recipients.sent).toHaveLength(0);
     },
   );
@@ -318,6 +318,6 @@ describe("the meeting support routes", () => {
 
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ reason: "no-draft" });
-    expect(stand.actions.proposed).toHaveLength(0);
+    expect(stand.meetingActions.proposed).toHaveLength(0);
   });
 });

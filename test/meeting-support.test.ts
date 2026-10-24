@@ -125,19 +125,19 @@ function setup(
     route: (settings) => (settings.apiKey === null ? null : provider),
     now: () => new Date("2026-10-22T09:41:12Z"),
   });
-  stand.actions.answers.set("meeting_get", (input) => {
+  stand.meetingActions.answers.set("meeting_get", (input) => {
     const found = meetings[(input as { id: string }).id];
     if (found === undefined) {
       throw actionRefusal("meeting-not-found", 404);
     }
     return found;
   });
-  stand.actions.answers.set("meeting_list", () => ({
+  stand.meetingActions.answers.set("meeting_list", () => ({
     meetings: [MEETING, EXTRA, LAST_YEAR],
     more: false,
   }));
   const support = new MeetingSupport(stand.host, gateway);
-  return { ...stand, provider, support };
+  return { ...stand, actions: stand.meetingActions, provider, support };
 }
 
 async function refused(

@@ -151,7 +151,31 @@ export interface ActionClient {
 }
 
 /**
- * `PendingChangeReceipt`: a write held for the person to confirm (ADR 0039).
+ * `ActionWithSchemas`: one action as `host.actions.list` offers it, with the
+ * fields this package reads and the JSON Schema of what it takes and what it
+ * returns (ADR 0038, "Schemas in process"). A host from before the schemas
+ * lists the summary alone, so both are optional here, and the package offers
+ * a model no tool it cannot describe.
+ */
+export interface ListedAction {
+  readonly name: string;
+  readonly title: string;
+  readonly description: string;
+  readonly group: string;
+  readonly effect: "read" | "write" | "delete";
+  readonly personalData: readonly string[];
+  readonly inputSchema?: Record<string, unknown>;
+  readonly outputSchema?: Record<string, unknown>;
+}
+
+/** `PluginActionFilter`. */
+export interface ListFilter {
+  readonly surface?: "ui" | "mcp" | "ai";
+  readonly group?: string;
+}
+
+/**
+ * `PendingChangeReceipt`: what proposing a change answers with (ADR 0039).
  * Nothing has run; the person confirms or rejects it at `path`.
  */
 export interface PendingChangeReceipt {
@@ -161,15 +185,70 @@ export interface PendingChangeReceipt {
   readonly path: string;
 }
 
-/** `PluginActions`, with `client` and `propose` where the host has them. */
-export type AiPackageActions = PluginHost["actions"] & {
-  readonly client?: (request: ActionRequest) => ActionClient | null;
+/** `PluginActions`, with the members newer than the SDK where the host has them. */
+export type AiPackageActions = Omit<PluginHost["actions"], "list"> & {
+  readonly list: (
+    request: ActionRequest,
+    filter?: ListFilter,
+  ) => Promise<ListedAction[]>;
   readonly propose?: (
     request: ActionRequest,
     name: string,
     input: unknown,
   ) => Promise<PendingChangeReceipt>;
+  readonly client?: (request: ActionRequest) => ActionClient | null;
 };
+
+/**
+ * `ActionRefusal`: what `host.actions.invoke` and `propose` reject with when
+ * the call was refused, with the fields this package hands a model. Never the
+ * input itself.
+ */
+export interface ActionRefusalFields {
+  readonly kind: "registry" | "invalid-body" | "domain";
+  readonly reason: string;
+  readonly retry: "never" | "after-edit" | "after-backoff";
+  /**
+   * The particulars the refusal publishes, keyed by the field they travel in:
+   * `issues` on an invalid body, `scopes` on an insufficient scope.
+   */
+  readonly details: Readonly<Record<string, readonly unknown[]>>;
+  /** For an invalid body, each failing field's path and message. */
+  readonly issues: readonly unknown[];
+}
+
+/**
+ * The refusal an action call rejected with, or null when it failed rather than
+ * being refused. Read by its fields, as the SDK's `isActionRefusal` reads it:
+ * the host builds the error, and this bundle has no copy of its class.
+ */
+export function actionRefusalOf(error: unknown): ActionRefusalFields | null {
+  if (!(error instanceof Error) || error.name !== "ActionRefusal") {
+    return null;
+  }
+  const { kind, reason, retry, details } = error as Error &
+    Partial<Record<"kind" | "reason" | "retry" | "details", unknown>>;
+  if (
+    (kind !== "registry" && kind !== "invalid-body" && kind !== "domain") ||
+    typeof reason !== "string" ||
+    (retry !== "never" && retry !== "after-edit" && retry !== "after-backoff")
+  ) {
+    return null;
+  }
+  let published: Readonly<Record<string, readonly unknown[]>> = {};
+  if (typeof details === "function") {
+    try {
+      const read: unknown = (details as () => unknown).call(error);
+      if (typeof read === "object" && read !== null) {
+        published = read as Record<string, readonly unknown[]>;
+      }
+    } catch {
+      // A refusal whose details cannot be read is still a refusal.
+    }
+  }
+  const issues = Array.isArray(published.issues) ? published.issues : [];
+  return { kind, reason, retry, details: published, issues };
+}
 
 /** The host object, with the members above where the host has them. */
 export type AiPackageHost = Omit<PluginHost, "actions"> & {

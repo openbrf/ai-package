@@ -64,6 +64,12 @@ export interface ModelTool {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: Readonly<Record<string, unknown>>;
+  /**
+   * Whether the provider holds the model's input to the schema exactly. Only
+   * for a schema in which every object refuses unknown keys and lists every
+   * key as required.
+   */
+  readonly strict?: boolean;
 }
 
 /** How much effort the model spends; a provider maps it to its own scale. */
@@ -83,6 +89,13 @@ export interface ModelRequest {
    * and a provider may support less of JSON Schema than the caller checks.
    */
   readonly outputSchema?: Readonly<Record<string, unknown>>;
+  /**
+   * Whether the provider may keep the request's start in its cache for the
+   * next call. Worth it for a conversation that goes on over several calls, as
+   * a tool loop does: each call sends the one before it again. The provider
+   * keeps it for minutes, under the association's agreement with it.
+   */
+  readonly cache?: boolean;
   /** How long to wait for the answer. Two minutes when left out. */
   readonly timeoutMs?: number;
 }

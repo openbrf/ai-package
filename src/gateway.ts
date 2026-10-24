@@ -146,20 +146,7 @@ export class AiGateway {
       );
     }
 
-    const host = this.supported();
-    if (host === null) {
-      throw new AiRefusal("host-unsupported");
-    }
-    if ((await this.licence())?.status !== "active") {
-      throw new AiRefusal("entitlement-required");
-    }
-    const settings = aiSettings(await this.host.settings.read());
-    const provider = this.route(settings, host.recipients);
-    if (provider === null) {
-      throw new AiRefusal("provider-not-configured");
-    }
-
-    const meter = new UsageMeter(host.records, this.now);
+    const { meter, settings, provider } = await this.ready();
     const admission = await meter.admit(settings);
     if (!admission.admitted) {
       throw admission.reason === "rate-limited"
@@ -193,6 +180,24 @@ export class AiGateway {
     return response;
   }
 
+  /**
+   * What is left of this month's limit, in tokens, for an assistant whose
+   * task takes several calls and should not start one it has no room to
+   * finish. It makes the checks `complete` makes before the limit, and
+   * refuses as `complete` would: with `usage-limit-reached` when nothing is
+   * left. What it answers is no promise: calls under way elsewhere may use
+   * it first.
+   */
+  async tokensLeft(): Promise<number> {
+    const { meter, settings } = await this.ready();
+    const { usage } = await meter.thisMonth();
+    const left = settings.monthlyTokenLimit - totalTokens(usage);
+    if (left <= 0) {
+      throw new AiRefusal("usage-limit-reached");
+    }
+    return left;
+  }
+
   /** The licence, the key, the model and this month's use, for the board. */
   async status(): Promise<AiStatus> {
     const host = this.supported();
@@ -221,6 +226,34 @@ export class AiGateway {
             },
       monthlyTokenLimit: settings.monthlyTokenLimit,
       requestsPerMinute: settings.requestsPerMinute,
+    };
+  }
+
+  /**
+   * The host, the licence and the key a call needs, checked in that order,
+   * with the settings and the provider they give.
+   */
+  private async ready(): Promise<{
+    meter: UsageMeter;
+    settings: AiSettings;
+    provider: ModelProvider;
+  }> {
+    const host = this.supported();
+    if (host === null) {
+      throw new AiRefusal("host-unsupported");
+    }
+    if ((await this.licence())?.status !== "active") {
+      throw new AiRefusal("entitlement-required");
+    }
+    const settings = aiSettings(await this.host.settings.read());
+    const provider = this.route(settings, host.recipients);
+    if (provider === null) {
+      throw new AiRefusal("provider-not-configured");
+    }
+    return {
+      meter: new UsageMeter(host.records, this.now),
+      settings,
+      provider,
     };
   }
 

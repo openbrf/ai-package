@@ -241,7 +241,7 @@ export function actionRefusal(
  * the test gives it, every call is kept, and a proposal is held and answered
  * with a receipt.
  */
-export class StandInActions {
+export class StandInMeetingActions {
   readonly invoked: { name: string; input: unknown }[] = [];
   readonly proposed: { name: string; input: unknown }[] = [];
   /** What each action answers with, or the refusal it rejects with. */
@@ -276,7 +276,8 @@ export class StandInActions {
 
 export interface StandIn {
   host: AiPackageHost;
-  actions: StandInActions;
+  /** The platform's meeting actions, which `host.actions` dispatches to. */
+  meetingActions: StandInMeetingActions;
   settings: Record<string, unknown>;
   records: MemoryRecords;
   recipients: StandInRecipients;
@@ -286,11 +287,15 @@ export interface StandIn {
 
 export interface StandInOptions {
   /** Leave out a member, as an older host does. */
-  without?: readonly ("recipients" | "records" | "entitlements")[];
+  without?: readonly (
+    "recipients" | "records" | "entitlements" | "actions.client"
+  )[];
   settings?: Record<string, unknown>;
   entitlement?: EntitlementState;
   /** Whether `actions.client` names a connected app for every request. */
   connectedApp?: boolean;
+  /** The host's action dispatch, in place of the meeting actions stood in for. */
+  actions?: Pick<AiPackageHost["actions"], "list" | "invoke">;
 }
 
 export function standIn(options: StandInOptions = {}): StandIn {
@@ -306,7 +311,7 @@ export function standIn(options: StandInOptions = {}): StandIn {
   const recipients = new StandInRecipients();
   const entitlement = { state: options.entitlement ?? ACTIVE };
   const logged: StandIn["logged"] = [];
-  const actions = new StandInActions();
+  const actions = new StandInMeetingActions();
   const log =
     (level: string) =>
     (message: string): void => {
@@ -334,10 +339,15 @@ export function standIn(options: StandInOptions = {}): StandIn {
               actions.propose(request, name, input)
           : undefined;
       },
-      client: () =>
-        options.connectedApp === true
-          ? { clientId: "client-1", clientHost: "client.example" }
-          : null,
+      ...options.actions,
+      ...(without.has("actions.client")
+        ? {}
+        : {
+            client: () =>
+              options.connectedApp === true
+                ? { clientId: "client-1", clientHost: "client.example" }
+                : null,
+          }),
     },
     ...(without.has("recipients") ? {} : { recipients }),
     ...(without.has("records") ? {} : { records }),
@@ -348,7 +358,7 @@ export function standIn(options: StandInOptions = {}): StandIn {
 
   return {
     host,
-    actions,
+    meetingActions: actions,
     settings,
     records,
     recipients,

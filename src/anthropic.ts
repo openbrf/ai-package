@@ -179,11 +179,17 @@ export function requestBody(
               ...tool.inputSchema,
               type: "object" as const,
             },
+            ...(tool.strict === true ? { strict: true } : {}),
           })),
         }),
     ...(Object.keys(outputConfig).length === 0
       ? {}
       : { output_config: outputConfig }),
+    // The API puts the mark on the last block it can cache, so a loop that
+    // sends its conversation again reads the earlier calls from the cache.
+    ...(request.cache === true
+      ? { cache_control: { type: "ephemeral" as const } }
+      : {}),
     ...(fallback ? { fallbacks: "default" as const } : {}),
   };
 }
