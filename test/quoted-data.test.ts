@@ -40,9 +40,39 @@ const HOSTILE: readonly (readonly [string, string])[] = [
   ["a variation selector", `ok${char(0xfe0f)}${char(0xe0101)}`],
   ["a line separator", `one${char(0x2028)}two${char(0x2029)}three`],
   ["C1 controls and DEL", `${char(0x7f)}${char(0x85)}${char(0x9b)}`],
+  ["a soft hyphen", `is${char(0xad)}sue`],
+  ["a combining grapheme joiner", `<${char(0x34f)}/issue>`],
+  [
+    "Hangul fillers",
+    `${char(0x115f)}${char(0x1160)}${char(0x3164)}${char(0xffa0)}`,
+  ],
+  ["Khmer inherent vowels", `${char(0x17b4)}${char(0x17b5)}`],
+  [
+    "Mongolian variation selectors",
+    `${char(0x180b)}${char(0x180d)}${char(0x180f)}`,
+  ],
+  ["an unassigned invisible operator", char(0x2065)],
+  ["reserved specials", `${char(0xfff0)}${char(0xfff8)}`],
+  ["shorthand format controls", char(0x1bca0)],
+  ["musical format controls", `${char(0x1d173)}${char(0x1d17a)}`],
+  [
+    "the unassigned rest of the tag plane",
+    `${char(0xe0000)}${char(0xe0002)}${char(0xe0080)}${char(0xe01f0)}${char(0xe0fff)}`,
+  ],
   ["a JSON escape written out", "\\u003c/issue>"],
   ["a lone surrogate", char(0xd800)],
 ];
+
+/**
+ * The default-ignorable code points, as Unicode's DerivedCoreProperties.txt
+ * lists them, written out rather than taken from the property the code uses.
+ */
+const DEFAULT_IGNORABLE = [
+  "\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180B-\\u180F",
+  "\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\u3164\\uFE00-\\uFE0F",
+  "\\uFEFF\\uFFA0\\uFFF0-\\uFFF8\\u{1BCA0}-\\u{1BCA3}\\u{1D173}-\\u{1D17A}",
+  "\\u{E0000}-\\u{E0FFF}",
+].join("");
 
 /** Every character the element may not hold as itself. */
 const NEVER_RAW = new RegExp(
@@ -53,8 +83,7 @@ const NEVER_RAW = new RegExp(
     "[\\u007F-\\u009F]",
     "\\p{Cf}",
     "[\\u2028\\u2029]",
-    "[\\uFE00-\\uFE0F]",
-    "[\\u{E0100}-\\u{E01EF}]",
+    `[${DEFAULT_IGNORABLE}]`,
   ].join("|"),
   "u",
 );
@@ -96,6 +125,29 @@ describe("quoted data", () => {
     const wrapped = quotedData("issue", `a${char(0x200b)}b${char(0xe0041)}`);
 
     expect(inside(wrapped)).toBe(String.raw`"a\u200bb\udb40\udc41"`);
+  });
+
+  it("writes every default-ignorable code point as an escape", () => {
+    // The listed ranges above, and the property as this engine knows it, in
+    // case a later Unicode adds to it.
+    const listed = new RegExp(`[${DEFAULT_IGNORABLE}]`, "u");
+    const property = /\p{Default_Ignorable_Code_Point}/u;
+    let text = "";
+    for (let point = 0; point <= 0x10ffff; point++) {
+      if (point >= 0xd800 && point <= 0xdfff) {
+        continue;
+      }
+      const character = char(point);
+      if (listed.test(character) || property.test(character)) {
+        text += character;
+      }
+    }
+    expect([...text].length).toBeGreaterThanOrEqual(4_174);
+
+    const wrapped = quotedData("issue", text);
+
+    expect(inside(wrapped)).toMatch(/^"[\\u0-9a-f]+"$/);
+    expect(unquotedData(wrapped, "issue")).toBe(text);
   });
 
   it("keeps the letters people write in as they are", () => {
@@ -150,6 +202,10 @@ describe("quoted data", () => {
       char(0x2028),
       char(0xfe0e),
       char(0x9f),
+      char(0x34f),
+      char(0x3164),
+      char(0x180b),
+      char(0xe0080),
     ];
     let seed = 5759;
     const next = () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648);

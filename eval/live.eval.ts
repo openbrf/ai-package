@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { AiRefusal } from "../src/gateway.ts";
 import { CASES } from "./cases.ts";
 import { evaluatedModels, liveProvider } from "./live-provider.ts";
-import { type CaseRun, casesOf, runCase, SCENARIOS } from "./scenarios.ts";
+import { casesOf, retrying, runCase, SCENARIOS } from "./scenarios.ts";
 
 /**
  * The release gate: every case of the corpus, in every scenario that reads
@@ -12,15 +11,14 @@ import { type CaseRun, casesOf, runCase, SCENARIOS } from "./scenarios.ts";
  * Run with `pnpm eval` and `ANTHROPIC_API_KEY` set. `EVAL_MODELS` narrows the
  * models (comma-separated) and `EVAL_REPEAT` runs each case more than once,
  * since a model does not answer the same way every time. Any case that fails
- * once fails the gate, and so does a case the provider would not run: a gate
- * that did not run is not green.
+ * once fails the gate, and so does a case the provider would not run, or one
+ * in which the planted text never reached the model: a gate that did not run
+ * is not green. A call the provider was busy for is tried again within the
+ * same run, so what the model did before it still counts.
  */
 
 const apiKey = process.env.ANTHROPIC_API_KEY?.trim() ?? "";
 const repeat = Number(process.env.EVAL_REPEAT ?? "1");
-
-/** How often a call the provider turned away is tried again. */
-const ATTEMPTS = 4;
 
 describe("the prompt-injection evaluation", () => {
   it("has a key and a sensible repeat", () => {
@@ -33,7 +31,7 @@ describe("the prompt-injection evaluation", () => {
 });
 
 describe.runIf(apiKey !== "").each(evaluatedModels())("%s", (model) => {
-  const provider = liveProvider(apiKey, model);
+  const provider = retrying(liveProvider(apiKey, model));
 
   describe.each(SCENARIOS)("$name", (scenario) => {
     it.concurrent.each(casesOf(scenario, CASES).map((each) => [each.id, each]))(
@@ -42,41 +40,16 @@ describe.runIf(apiKey !== "").each(evaluatedModels())("%s", (model) => {
         // A repeat that is not a number would run nothing and pass.
         expect(Number.isSafeInteger(repeat) && repeat >= 1).toBe(true);
         for (let run = 0; run < repeat; run++) {
-          const result = await withRetries(() =>
-            runCase(scenario, planted, provider),
-          );
+          const result = await runCase(scenario, planted, provider);
           expect(
             result.violations,
             `${planted.technique}, run ${String(run + 1)}: ended ${result.end}, ` +
               `asked for ${JSON.stringify(result.record.asked)}, ` +
-              `proposed ${JSON.stringify(result.record.proposed)}`,
+              `proposed ${JSON.stringify(result.record.proposed)}, ` +
+              `never read ${JSON.stringify(result.record.unseen)}`,
           ).toEqual([]);
         }
       },
     );
   });
 });
-
-/**
- * A run, again when the provider was busy or turned the call away, after the
- * wait it asked for or a growing one.
- */
-async function withRetries(run: () => Promise<CaseRun>): Promise<CaseRun> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await run();
-    } catch (error) {
-      const busy =
-        error instanceof AiRefusal &&
-        (error.reason === "rate-limited" ||
-          error.reason === "provider-failed") &&
-        error.providerReason !== "unauthorised" &&
-        error.providerReason !== "request-refused";
-      if (!busy || attempt >= ATTEMPTS) {
-        throw error;
-      }
-      const seconds = error.retryAfterSeconds ?? 10 * 2 ** attempt;
-      await new Promise((resolve) => setTimeout(resolve, seconds * 1_000));
-    }
-  }
-}

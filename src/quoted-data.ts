@@ -16,12 +16,13 @@
  * (`\u003c` for `<`), which a JSON parser reads back as the same character
  * and which leaves no `<` in the element for the writer to start `</issue>`
  * with. That covers `<` and `>`, `&` (so `&lt;/issue&gt;` cannot be read as
- * an entity), the brackets that look like them in other scripts, and the
- * characters that do not show at all: controls, format characters such as
- * zero-width spaces, direction marks and the tag characters text can be
- * hidden in, line and paragraph separators, and variation selectors. The
- * model sees each of those as an escape, so nothing in the text is hidden
- * from it either.
+ * an entity), the brackets that look like them in other scripts, controls,
+ * format characters, line and paragraph separators, and every character
+ * Unicode calls default-ignorable: those a screen does not show, such as
+ * zero-width spaces, direction marks, the Hangul fillers, variation selectors
+ * and the tag characters text can be hidden in. The model sees each of those
+ * as an escape. Other characters go in as they are, letters that look like
+ * other letters, spaces and combining marks among them.
  *
  * The delimiter is not what keeps the package safe: an assistant offers the
  * model no action that does anything before a person confirms it. It keeps
@@ -44,13 +45,17 @@ const ELEMENT_NAME = /^[a-z][a-z0-9_]{0,63}$/;
  * - controls, which JSON leaves alone from U+007F up, other than the line
  *   breaks of the JSON's own layout;
  * - format characters (`Cf`): zero-width spaces and joiners, direction marks
- *   and embeddings, the byte order mark, the tag characters U+E0000-U+E007F;
+ *   and embeddings, the byte order mark;
  * - line and paragraph separators (`Zl`, `Zp`);
- * - variation selectors U+FE00-U+FE0F and U+E0100-U+E01EF, which can carry
- *   text that is not shown.
+ * - default-ignorable code points (`Default_Ignorable_Code_Point`), which a
+ *   screen does not show: beyond the format characters, the combining
+ *   grapheme joiner U+034F, the Hangul fillers U+115F, U+1160, U+3164 and
+ *   U+FFA0, the Mongolian variation selectors, the variation selectors
+ *   U+FE00-U+FE0F and U+E0100-U+E01EF, and the whole of U+E0000-U+E0FFF with
+ *   the tag characters, assigned or not.
  */
 const ESCAPED =
-  /[<>&\u02C2\u02C3\u2039\u203A\u2329\u232A\u276C-\u276F\u27E8\u27E9\u29FC\u29FD\u3008-\u300B\uFE64\uFE65\uFF1C\uFF1E\u1433\u1438\0-\x09\x0B-\x1F\x7F-\x9F\p{Cf}\p{Zl}\p{Zp}\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu;
+  /[<>&\u02C2\u02C3\u2039\u203A\u2329\u232A\u276C-\u276F\u27E8\u27E9\u29FC\u29FD\u3008-\u300B\uFE64\uFE65\uFF1C\uFF1E\u1433\u1438\0-\x09\x0B-\x1F\x7F-\x9F\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu;
 
 /**
  * `value` as JSON inside an element named `element`, which nothing in the
