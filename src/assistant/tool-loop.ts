@@ -7,6 +7,7 @@ import {
   actionRefusalOf,
   type PluginDisclosure,
 } from "../host-contract.ts";
+import { isElementName, quotedData } from "../quoted-data.ts";
 import type {
   ModelMessage,
   ModelRequest,
@@ -24,7 +25,8 @@ import type {
  * in the groups the assistant names, as `host.actions.list` hands them over:
  * filtered by the person's capabilities and the arming, so the model is told
  * of nothing the person could not do themselves. A read runs through
- * `invoke`. Every other call is proposed through `host.actions.propose` and
+ * `invoke`, and its answer reaches the model as quoted data
+ * (`quoted-data.ts`), in an element named after the read. Every other call is proposed through `host.actions.propose` and
  * never invoked, so nothing the model chooses is written until the person
  * confirms it on the platform's own screen (ADR 0039). The host refuses a
  * write on `ai` all the same; the loop does not lean on that.
@@ -206,10 +208,15 @@ export async function runToolLoop(
           action.name,
           use.input,
         );
+        // What a read answers was written by people, so the text in it
+        // cannot close the element or pass for the package's own words.
         return {
           type: "tool_result",
           toolUseId: use.id,
-          content: json(output),
+          content: quotedData(
+            isElementName(action.name) ? action.name : "action_result",
+            output,
+          ),
         };
       }
 

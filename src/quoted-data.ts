@@ -57,6 +57,11 @@ const ELEMENT_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const ESCAPED =
   /[<>&\u02C2\u02C3\u2039\u203A\u2329\u232A\u276C-\u276F\u27E8\u27E9\u29FC\u29FD\u3008-\u300B\uFE64\uFE65\uFF1C\uFF1E\u1433\u1438\0-\x09\x0B-\x1F\x7F-\x9F\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu;
 
+/** Whether `name` may name the element `quotedData` writes. */
+export function isElementName(name: string): boolean {
+  return ELEMENT_NAME.test(name);
+}
+
 /**
  * `value` as JSON inside an element named `element`, which nothing in the
  * value can close. `element` is the package's own name for what the value is,
