@@ -252,14 +252,14 @@ and the reasons are in the language the request asks for. When there are no
 suggestions, the route answers with the gateway's refusals in the table above,
 and with these of its own:
 
-| Status | `reason`             | Why                                                                                                   |
-| ------ | -------------------- | ----------------------------------------------------------------------------------------------------- |
-| 400    | `issue-id-invalid`   | No issue id, one the core could not have handed out, or a body with other fields.                     |
-| 404    | `issue-not-found`    | No issue by that id that this person may read, which includes one handled only on the board's screen. |
-| 422    | `model-declined`     | The model declined to triage the issue.                                                               |
-| 429    | `too-little-left`    | Less is left of this month's limit than one triage may use, 40,000 tokens.                            |
-| 502    | `no-triage`          | The model gave no triage the package could check within its calls and its budget.                     |
-| 503    | `issues-unavailable` | The host offers this person no `issue_get` or no `issue_type_list` on the `ai` surface.               |
+| Status | `reason`             | Why                                                                                                            |
+| ------ | -------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 400    | `issue-id-invalid`   | No issue id, one the core could not have handed out, or a body with other fields.                              |
+| 404    | `issue-not-found`    | No issue by that id that this person may read, which includes one handled only on the board's screen.          |
+| 422    | `model-declined`     | The model declined to triage the issue.                                                                        |
+| 429    | `too-little-left`    | Less is left of this month's limit than one triage may use, 40,000 tokens.                                     |
+| 502    | `no-triage`          | The model gave no triage the package could check within its calls and its budget.                              |
+| 503    | `issues-unavailable` | The host offers this person no `issue_get` or no `issue_type_list` on the `ai` surface, or refuses the latter. |
 
 `issue_type_list` is newer than the issue reads, so an instance without it
 answers `issues-unavailable`. A screen that shows the suggestions shows them as

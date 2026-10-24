@@ -18,6 +18,7 @@ import {
 } from "../src/provider.ts";
 import { UsageMeter } from "../src/usage.ts";
 import { INJECTIONS } from "./injection-issues.ts";
+import { ActionRefusalStandIn } from "./stand-in-archive.ts";
 import { FakeProvider, type StandIn, standIn } from "./stand-in-host.ts";
 import {
   EXTERNAL,
@@ -506,6 +507,26 @@ describe("when there is nothing to triage", () => {
       (await refusal(assistant.triage(REQUEST, LEAK.id, "sv"))).reason,
     ).toBe("issues-unavailable");
     expect(queue.dispatched).toEqual([]);
+    expect(provider.calls).toEqual([]);
+  });
+
+  it("refuses when the core refuses to list the types", async () => {
+    const { assistant, host, provider } = setup();
+    const read = host.actions.invoke;
+    host.actions.invoke = async (request, name, input) => {
+      if (name === "issue_type_list") {
+        throw new ActionRefusalStandIn(
+          "registry",
+          "action-unavailable",
+          "never",
+        );
+      }
+      return read(request, name, input);
+    };
+
+    expect(
+      (await refusal(assistant.triage(REQUEST, LEAK.id, "sv"))).reason,
+    ).toBe("issues-unavailable");
     expect(provider.calls).toEqual([]);
   });
 

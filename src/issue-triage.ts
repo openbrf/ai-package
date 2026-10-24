@@ -133,7 +133,7 @@ export interface IssueTriage {
  *
  * - `issues-unavailable`: the host offers this person no issue reads on the
  *   `ai` surface, which is an instance older than the package or one without
- *   `issue_type_list`.
+ *   `issue_type_list`, or the core refuses `issue_type_list` when it is read.
  * - `issue-not-found`: no issue by that id that this person may read. An issue
  *   handled only on the board's own screen is answered the same way.
  * - `too-little-left`: less is left of this month's limit than one triage may
@@ -405,8 +405,10 @@ export class IssueTriageAssistant {
 
   /**
    * One of the core's reads, as the person whose request this is. The issue
-   * read's refusal of the id is answered as no such issue; any other refusal
-   * is a fault, since the route has already checked who is asking and what.
+   * read's refusal of the id is answered as no such issue, and the type
+   * catalogue's refusal as the issue reads being unavailable; any other
+   * refusal is a fault, since the route has already checked who is asking and
+   * what.
    */
   private async read(
     request: ActionRequest,
@@ -424,6 +426,9 @@ export class IssueTriageAssistant {
           refusal.kind === "invalid-body")
       ) {
         throw new TriageRefusal("issue-not-found");
+      }
+      if (name === "issue_type_list" && refusal !== null) {
+        throw new TriageRefusal("issues-unavailable");
       }
       throw error;
     }
