@@ -448,6 +448,11 @@ export function triagePrompt(
   types: readonly IssueTypeReference[],
   language: Language,
 ): string {
+  // The titles are cut for the model only; the board reads the catalogue's.
+  const modelTypes = types.map((type) => ({
+    ...type,
+    title: type.title.slice(0, TYPE_TITLE_MAX_LENGTH),
+  }));
   return [
     `Triage the issue below. The board member reads ${LANGUAGE_NAMES[language]}.`,
     "",
@@ -456,7 +461,7 @@ export function triagePrompt(
     "</issue>",
     "",
     "<issue_types>",
-    quoted(types),
+    quoted(modelTypes),
     "</issue_types>",
   ].join("\n");
 }
@@ -490,7 +495,7 @@ function typeReference(type: Record<string, unknown>): IssueTypeReference {
         : "";
   return {
     id: typeof type.id === "string" ? type.id : "",
-    title: title.slice(0, TYPE_TITLE_MAX_LENGTH),
+    title,
     audience: typeof type.audience === "string" ? type.audience : "",
   };
 }

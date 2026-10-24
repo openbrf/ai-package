@@ -196,7 +196,7 @@ describe("issue triage's route", () => {
       statusCode: 429,
       reason: "too-little-left",
       message:
-        "Less is left of this month's limit for the AI package than one triage may use, 40,000 tokens. Triage works again when the next month starts only if the monthly limit is at least 40,000 tokens. A lower limit must be raised in the settings to at least that.",
+        "Too few tokens remain in this month's limit for the AI package for this triage to start or continue. Triage works again when the next month starts only if the monthly limit is at least 40,000 tokens. A lower limit must be raised in the settings to at least that.",
     });
     expect(recipients.sent).toEqual([]);
   });

@@ -307,6 +307,23 @@ describe("what the model's triage is held to", () => {
     expect(suggestions.category.suggested?.title).toBe("Lås och dörrar");
   });
 
+  it("cuts a long type title for the model only, and returns the catalogue's", async () => {
+    const { assistant, provider, queue } = setup();
+    const long = "Vatten ".repeat(30);
+    queue.types = [
+      { id: "type-water", title: long, audience: "MEMBER", active: true },
+    ];
+    provider.answers.push(turn(triage()));
+
+    const suggestions = await assistant.triage(REQUEST, LEAK.id, "sv");
+
+    expect(suggestions.category.suggested?.title).toBe(long);
+    const sent = element(prompt(provider), "issue_types") as {
+      title: string;
+    }[];
+    expect(sent[0]?.title).toBe(long.slice(0, 100));
+  });
+
   it("refuses any other tool, and runs nothing for it", async () => {
     const { assistant, provider, queue } = setup();
     provider.answers.push(
