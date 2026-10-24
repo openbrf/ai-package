@@ -309,7 +309,12 @@ the document assistant reads. That text can name residents and their
 apartments, and residents sometimes write about their health. The manifest
 declares this for the board to read on the consent screen before the package
 is installed: the personal-data categories `name`, `apartment`, `freeText` and
-`health`, and the one recipient that receives them.
+`health`, and the one recipient that receives them. It also declares what that
+processing is for (ADR 0035 in openbrf/openbrf): the purpose, legitimate
+interest as the legal basis with the interest relied on, that the package
+keeps no text, and members and residents as the people concerned. The install
+seeds the package's row in the record of processing activities from it, and
+the board can change that row on the data protection screen.
 
 Each call to the model tells the host which categories it carries. For the
 document assistant: free text for the question, and the categories each read

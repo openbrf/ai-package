@@ -50,7 +50,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: openbrf/openbrf
-          ref: 905a74cb4afc71b387cc23313041f5cc245e3714
+          ref: 87641686978ca805c59c4e4fc3be0bd79c7cabef
           path: openbrf
           persist-credentials: false
           sparse-checkout: packages/plugin-sdk/src
