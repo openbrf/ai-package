@@ -1,12 +1,15 @@
 name: Prompt-injection evaluation
 
 # The release gate: every case of eval/cases.ts against the real models, on
-# the repository secret ANTHROPIC_API_KEY. A failed case fails the run, and so
-# does a missing key. See "The evaluation" in the README.
+# the secret ANTHROPIC_API_KEY of the environment injection-eval. A failed
+# case fails the run, and so does a missing key. See "The evaluation" in the
+# README, which lists the repository settings that guard the key.
+#
+# No push trigger: the release workflow calls this one, and a tag that also
+# started it would run the whole evaluation twice, at twice the spend, with
+# two results that may disagree.
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       models:
@@ -14,11 +17,13 @@ on:
         required: false
         default: ""
         type: string
+      # At most ten, as eval/live-provider.ts enforces (MAX_EVAL_REPEAT).
       repeat:
         description: How many times each case runs.
         required: false
         default: "1"
-        type: string
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
   # For the release workflow, whose publishing job is to need this one.
   workflow_call:
     secrets:
@@ -37,6 +42,8 @@ jobs:
   evaluate:
     name: Prompt-injection evaluation
     runs-on: ubuntu-latest
+    # Holds the key. Its deployment rules decide which refs may read it.
+    environment: injection-eval
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

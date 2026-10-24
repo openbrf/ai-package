@@ -92,6 +92,29 @@ export function evaluatedModels(
   return models as AnthropicModel[];
 }
 
+/**
+ * The most times `EVAL_REPEAT` may run each case. A full run is every case
+ * in every scenario against every model, so each repeat is another full run's
+ * spend on the key.
+ */
+export const MAX_EVAL_REPEAT = 10;
+
+/** How many times each case runs: `EVAL_REPEAT`, 1 when it is not set. */
+export function evalRepeat(given = process.env.EVAL_REPEAT): number {
+  const text = given?.trim() ?? "";
+  if (text === "") {
+    return 1;
+  }
+  // Digits only: Number() would also take "1e1", " 0x5" or "10.0".
+  const repeat = /^[0-9]{1,3}$/.test(text) ? Number(text) : Number.NaN;
+  if (!(repeat >= 1 && repeat <= MAX_EVAL_REPEAT)) {
+    throw new Error(
+      `EVAL_REPEAT is ${JSON.stringify(given)}, not a whole number from 1 to ${String(MAX_EVAL_REPEAT)}.`,
+    );
+  }
+  return repeat;
+}
+
 export function liveProvider(
   apiKey: string,
   model: AnthropicModel,
