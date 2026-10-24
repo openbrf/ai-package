@@ -36,6 +36,13 @@ const manifest = (
   ) as {
     openbrf: {
       personalData: string[];
+      processing: {
+        purpose: Record<string, string>;
+        legalBasis: string;
+        legitimateInterest?: Record<string, string>;
+        retention: Record<string, string>;
+        dataSubjects: string[];
+      };
       settingsSchema: { fields: Field[] };
       recipients: { id: string; origin: string; personalData: string[] }[];
       licence: { entitlement: string };
@@ -119,6 +126,23 @@ describe("the manifest", () => {
         personalData: manifest.personalData,
       }),
     ]);
+  });
+
+  it("declares its processing of the personal data, in both languages", () => {
+    const { processing } = manifest;
+    expect(manifest.personalData.length).toBeGreaterThan(0);
+    expect(processing.legalBasis).toBe("legitimateInterest");
+    expect(processing.dataSubjects).toEqual(["members", "residents"]);
+    for (const text of [
+      processing.purpose,
+      processing.legitimateInterest,
+      processing.retention,
+    ]) {
+      for (const language of ["sv", "en"] as const) {
+        expect(text?.[language]?.trim()).toBeTruthy();
+        expect(text?.[language]?.length).toBeLessThanOrEqual(500);
+      }
+    }
   });
 
   it("reads the ai-package entitlement and declares itself an AI package", () => {

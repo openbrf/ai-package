@@ -27,6 +27,12 @@ import {
 import { AiGateway, AiRefusal, type AiStatus } from "./gateway.ts";
 import type { AiPackageHost } from "./host-contract.ts";
 import {
+  type IssueTriage,
+  IssueTriageAssistant,
+  TRIAGE_TOKEN_BUDGET,
+  TriageRefusal,
+} from "./issue-triage.ts";
+import {
   type Language,
   languageOf,
   type MessageKey,
@@ -36,10 +42,11 @@ import {
 /**
  * The AI package's server entry point.
  *
- * It builds the gateway the assistants reach a model through and serves two
+ * It builds the gateway the assistants reach a model through and serves three
  * routes: `status`, which the board's screen reads (the licence finding, the
  * provider and model, whether a key is entered, and this month's use against
- * the limit), and `documents/ask`, the document assistant.
+ * the limit), `documents/ask`, the document assistant, and `issues/triage`,
+ * issue triage.
  *
  * The controllers take no constructor arguments: they close over the host
  * object instead. The bundler that builds this file does not emit the
@@ -59,6 +66,7 @@ export const createPlugin: PluginModuleFactory = (
   const host = pluginHost as unknown as AiPackageHost;
   const gateway = new AiGateway(host);
   const documents = new DocumentAssistant(host, gateway);
+  const triage = new IssueTriageAssistant(host, gateway);
 
   /**
    * `association:read`, as the instance's plugin list is: the board answers
@@ -125,7 +133,44 @@ export const createPlugin: PluginModuleFactory = (
   }
 
   /**
-   * The refusal of a request neither route serves, or null. A host without
+   * `issues:handle` and `issues:configure`: the board. The first is what the
+   * issue reads need, which the property manager holds too; the second is the
+   * board's alone. Each triage is paid for on the association's key and
+   * counts against its monthly limit, so it is the board's, as the record of
+   * processing says. The property manager reads the queue on the board's
+   * screen, or through the MCP Connector with a model of their own.
+   *
+   * A connected app is refused, as for the document assistant.
+   */
+  @Controller("issues")
+  @SetMetadata(REQUIRED_CAPABILITIES, ["issues:handle", "issues:configure"])
+  class IssueTriageController {
+    @Post("triage")
+    @HttpCode(200)
+    async triage(
+      @Req() request: ActionRequest,
+      @Body() body: unknown,
+      @Headers("accept-language") acceptLanguage: string | undefined,
+    ): Promise<IssueTriage> {
+      const language = languageOf(acceptLanguage);
+      const refused = callerRefusal(request, language);
+      if (refused !== null) {
+        throw refused;
+      }
+      const issueId = issueIdOf(body);
+      if (issueId === null) {
+        throw refusal(language, 400, "issue-id-invalid", "issueIdInvalid");
+      }
+      try {
+        return await triage.triage(request, issueId, language);
+      } catch (error) {
+        throw refusalFor(language, error);
+      }
+    }
+  }
+
+  /**
+   * The refusal of a request no route serves, or null. A host without
    * `actions.client` cannot say whether a connected app sent the request, so
    * it is answered as a host older than the package, before anything is read.
    */
@@ -146,7 +191,11 @@ export const createPlugin: PluginModuleFactory = (
 
   return {
     module: AiPackageModule,
-    controllers: [StatusController, DocumentAssistantController],
+    controllers: [
+      StatusController,
+      DocumentAssistantController,
+      IssueTriageController,
+    ],
   };
 };
 
@@ -172,6 +221,32 @@ export function questionOf(body: unknown): string | null {
   }
   return trimmed;
 }
+
+/**
+ * The issue a triage request names, or null: the body is
+ * `{ "issueId": "..." }` and nothing else, and the id is one the core could
+ * have handed out, at most 64 characters with no blanks or control
+ * characters.
+ */
+export function issueIdOf(body: unknown): string | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return null;
+  }
+  const { issueId, ...rest } = body as Record<string, unknown>;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof issueId !== "string" ||
+    issueId.length === 0 ||
+    issueId.length > ISSUE_ID_MAX_LENGTH ||
+    /[\p{Cc}\p{Cf}\p{Z}]/u.test(issueId)
+  ) {
+    return null;
+  }
+  return issueId;
+}
+
+/** The longest id the core's issue reads take. */
+const ISSUE_ID_MAX_LENGTH = 64;
 
 /** The answer an error gives the board member, in their language. */
 function refusalFor(language: Language, error: unknown): unknown {
@@ -214,6 +289,22 @@ function refusalFor(language: Language, error: unknown): unknown {
         return refusal(language, 422, error.reason, "modelDeclined");
       case "no-answer":
         return refusal(language, 502, error.reason, "noAnswer");
+    }
+  }
+  if (error instanceof TriageRefusal) {
+    switch (error.reason) {
+      case "issues-unavailable":
+        return refusal(language, 503, error.reason, "issuesUnavailable");
+      case "issue-not-found":
+        return refusal(language, 404, error.reason, "issueNotFound");
+      case "too-little-left":
+        return refusal(language, 429, error.reason, "triageTooLittleLeft", {
+          budget: new Intl.NumberFormat(language).format(TRIAGE_TOKEN_BUDGET),
+        });
+      case "model-declined":
+        return refusal(language, 422, error.reason, "triageModelDeclined");
+      case "no-triage":
+        return refusal(language, 502, error.reason, "noTriage");
     }
   }
   // Anything else is a fault, the host's to answer and log.
