@@ -17,7 +17,7 @@
     "node": ">=26"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "vite build && node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "eval": "vitest run --config eval/vitest.config.ts",
@@ -29,7 +29,8 @@
     "apiVersion": 1,
     "id": "ai-package",
     "entry": {
-      "server": "./dist/server.cjs"
+      "server": "./dist/server.cjs",
+      "client": "./dist/remoteEntry.js"
     },
     "permissions": [],
     "personalData": [
@@ -40,13 +41,13 @@
     ],
     "processing": {
       "purpose": {
-        "sv": "Styrelsens assistenter med språkmodell: svar på styrelsens frågor ur föreningens dokumentarkiv, med källor, och förslag på ärendetyp, prioritet och ett utkast till svar för ett ärende. Texten en assistent arbetar med skickas till föreningens leverantör av språkmodell. Styrelsen läser förslagen och beslutar själv, och ingenting skickas till den som anmälde.",
-        "en": "The board's language model assistants: answers to the board's questions from the association's document archive, with their sources, and a suggested issue type, priority and draft reply for an issue. The text an assistant works on is sent to the association's language model provider. The board reads the suggestions and decides itself, and nothing is sent to the reporter."
+        "sv": "Styrelsens assistenter med språkmodell: svar ur föreningens dokumentarkiv, med källor, utkast till nyheter och sidor, och förslag på ärendetyp, prioritet och svarsutkast för ett ärende. Texten en assistent arbetar med skickas till föreningens leverantör av språkmodell. Styrelsen läser och bekräftar eller beslutar själv, och ingenting skickas till den som anmälde.",
+        "en": "The board's language model assistants: answers from the association's document archive, with sources, drafts of news and pages, and a suggested issue type, priority and draft reply for an issue. The text an assistant works on is sent to the association's language model provider. The board reads and confirms or decides itself, and nothing is sent to the reporter."
       },
       "legalBasis": "legitimateInterest",
       "legitimateInterest": {
-        "sv": "Styrelsens förvaltning av föreningen: att hitta svar i föreningens egna dokument och att hantera ärenden snabbare.",
-        "en": "The board's running of the association: finding answers in the association's own documents and handling issues sooner."
+        "sv": "Styrelsens förvaltning av föreningen: att hitta svar i föreningens egna dokument, skriva nyheter och sidor och hantera ärenden snabbare.",
+        "en": "The board's running of the association: finding answers in the association's own documents, writing news and pages and handling issues sooner."
       },
       "retention": {
         "sv": "AI-paketet sparar ingen text: varken frågan, det som lästes, ärendet eller förslagen. Det sparar bara antal token per anrop och månad, månadens antal anrop, antal anrop under den aktuella minuten och de interna nycklar som visar vilka anrop månadens summa redan räknat. Inget av det pekar ut någon. Hur länge Anthropic behåller det som skickas styrs av föreningens eget avtal med Anthropic.",
@@ -56,6 +57,11 @@
         "members",
         "residents"
       ]
+    },
+    "view": {
+      "module": "./View",
+      "titleKey": "view.title",
+      "section": "board"
     },
     "settingsSchema": {
       "fields": [
@@ -147,17 +153,28 @@
     "@anthropic-ai/sdk": "1.1.0",
     "@commitlint/cli": "21.2.3",
     "@commitlint/config-conventional": "21.2.3",
+    "@module-federation/vite": "1.23.5",
     "@nestjs/common": "12.1.3",
     "@nestjs/core": "12.1.3",
     "@nestjs/platform-fastify": "12.1.3",
     "@openbrf/plugin-sdk": "1.0.0",
+    "@testing-library/react": "16.3.3",
     "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
     "esbuild": "0.28.2",
     "fastify": "5.12.5",
+    "i18next": "26.5.2",
+    "jsdom": "30.1.3",
     "prettier": "3.9.10",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-i18next": "17.1.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "typescript": "7.0.2",
+    "vite": "8.3.4",
     "vitest": "5.0.5",
     "zod": "4.6.7"
   }

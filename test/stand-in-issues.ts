@@ -89,15 +89,19 @@ export const EXTERNAL: StandInIssue = {
 const LISTED: readonly ListedAction[] = [
   {
     name: "issue_list",
+    title: "List issues",
     description: "Reads one page of the issue queue.",
     group: "issues",
+    effect: "read",
     personalData: ["name", "apartment", "freeText", "health"],
     inputSchema: { type: "object" },
   },
   {
     name: "issue_get",
+    title: "Read an issue",
     description: "Reads one issue from the queue.",
     group: "issues",
+    effect: "read",
     personalData: ["name", "apartment", "freeText", "health"],
     inputSchema: {
       type: "object",
@@ -108,8 +112,10 @@ const LISTED: readonly ListedAction[] = [
   },
   {
     name: "issue_type_list",
+    title: "List issue types",
     description: "Lists the issue types the board has set up for reports.",
     group: "issues",
+    effect: "read",
     personalData: [],
     inputSchema: { type: "object", additionalProperties: false },
   },

@@ -66,8 +66,12 @@ function listed(
 ): ListedAction {
   return {
     name,
+    title: name,
     description,
     group,
+    effect: (EXPOSURE_WRITES as readonly string[]).includes(name)
+      ? "write"
+      : "read",
     personalData,
     inputSchema: {
       type: "object",
