@@ -228,7 +228,7 @@ describe("a write the model chooses", () => {
     const { actions, provider, turn } = setup();
     actions.refusals.set(
       "news_create",
-      new ActionRefusalStandIn("invalid-body", "after-edit", {
+      new ActionRefusalStandIn("invalid-body", "invalid-body", "after-edit", {
         slug: ["Invalid string"],
       }),
     );

@@ -152,6 +152,19 @@ describe("the site assistant's route", () => {
     expect(actions.listed).toEqual([]);
   });
 
+  it("runs nothing on a host that cannot say whether a connected app asked", async () => {
+    const { url, recipients, actions } = await serve({
+      without: ["actions.client"],
+    });
+
+    const response = await post(url, TURN);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ outcome: "host-unsupported" });
+    expect(recipients.sent).toEqual([]);
+    expect(actions.listed).toEqual([]);
+  });
+
   it.each([
     ["no turn id", { messages: TURN.messages }],
     ["a turn id that is not one", { ...TURN, turnId: "turn-1" }],

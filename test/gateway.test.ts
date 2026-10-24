@@ -227,6 +227,48 @@ describe("the monthly limit", () => {
     expect(provider.calls).toHaveLength(0);
   });
 
+  it("tells an assistant what is left of the month, and refuses as a call would once nothing is", async () => {
+    const { gateway, provider } = setup({
+      settings: { monthlyTokenLimit: 250 },
+    });
+    provider.answers.push(answer({ inputTokens: 100, outputTokens: 20 }));
+    provider.answers.push(answer({ inputTokens: 100, outputTokens: 30 }));
+
+    expect(await gateway.tokensLeft()).toBe(250);
+    await gateway.complete(REQUEST, null);
+    expect(await gateway.tokensLeft()).toBe(130);
+    await gateway.complete(REQUEST, null);
+
+    expect((await refusal(gateway.tokensLeft())).reason).toBe(
+      "usage-limit-reached",
+    );
+  });
+
+  it("does not count asking what is left as a call", async () => {
+    const { gateway, provider } = setup({
+      settings: { requestsPerMinute: 1 },
+    });
+
+    await gateway.tokensLeft();
+    await gateway.tokensLeft();
+    await gateway.complete(REQUEST, null);
+
+    expect(provider.calls).toHaveLength(1);
+  });
+
+  it.each([
+    [{ without: ["entitlements"] }, "host-unsupported"],
+    [{ entitlement: { status: "absent" } }, "entitlement-required"],
+    [{ settings: { apiKey: "" } }, "provider-not-configured"],
+  ] as const)(
+    "makes the checks a call makes before saying what is left (%j)",
+    async (options, reason) => {
+      const { gateway } = setup(options);
+
+      expect((await refusal(gateway.tokensLeft())).reason).toBe(reason);
+    },
+  );
+
   it("counts every one of many calls finishing at once", async () => {
     const { gateway, records } = setup({
       settings: { requestsPerMinute: 120 },

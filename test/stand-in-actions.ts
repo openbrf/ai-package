@@ -1,11 +1,14 @@
 import type { ActionRequest } from "@openbrf/plugin-sdk";
 
 import type {
-  ActionWithSchemas,
   AiPackageActions,
+  ListedAction,
   PendingChangeReceipt,
 } from "../src/host-contract.ts";
 import type { ModelResponse, ModelToolUse } from "../src/provider.ts";
+import { ActionRefusalStandIn } from "./stand-in-archive.ts";
+
+export { ActionRefusalStandIn };
 
 /**
  * A stand-in for `host.actions` as an AI package's route sees it: the actions
@@ -27,20 +30,21 @@ const SCHEMA = {
 function action(
   name: string,
   group: string,
-  effect: ActionWithSchemas["effect"],
-): ActionWithSchemas {
+  effect: ListedAction["effect"],
+): ListedAction {
   return {
     name,
     title: `Title of ${name}`,
     description: `Description of ${name}.`,
     group,
     effect,
+    personalData: ["name", "freeText"],
     inputSchema: SCHEMA,
   };
 }
 
 /** What the host offers on `ai` after ADR 0038's "News and pages on `ai`". */
-export const OFFERED: readonly ActionWithSchemas[] = [
+export const OFFERED: readonly ListedAction[] = [
   action("news_list", "news", "read"),
   action("news_get", "news", "read"),
   action("news_create", "news", "write"),
@@ -53,20 +57,6 @@ export const OFFERED: readonly ActionWithSchemas[] = [
   action("document_list", "documents", "read"),
 ];
 
-export class ActionRefusalStandIn extends Error {
-  override readonly name = "ActionRefusal";
-  constructor(
-    readonly reason: string,
-    readonly retry: string,
-    private readonly fields: Record<string, readonly unknown[]> = {},
-  ) {
-    super(`refused: ${reason}`);
-  }
-  details(): Record<string, readonly unknown[]> {
-    return this.fields;
-  }
-}
-
 export interface Held {
   name: string;
   input: unknown;
@@ -74,7 +64,7 @@ export interface Held {
 }
 
 export class StandInActions {
-  offered: readonly ActionWithSchemas[] = OFFERED;
+  offered: readonly ListedAction[] = OFFERED;
   readonly listed: { request: ActionRequest; filter: unknown }[] = [];
   readonly reads: { name: string; input: unknown }[] = [];
   readonly written: { name: string; input: unknown }[] = [];
@@ -102,7 +92,11 @@ export class StandInActions {
         const offered = this.offered.find((held) => held.name === name);
         if (offered?.effect !== "read") {
           this.written.push({ name, input });
-          throw new ActionRefusalStandIn("confirmation-required", "never");
+          throw new ActionRefusalStandIn(
+            "registry",
+            "confirmation-required",
+            "never",
+          );
         }
         this.reads.push({ name, input });
         this.onRead(name);

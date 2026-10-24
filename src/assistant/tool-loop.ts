@@ -2,7 +2,7 @@ import type { ActionRequest } from "@openbrf/plugin-sdk";
 
 import { AiRefusal, type AiRefusalReason } from "../gateway.ts";
 import {
-  type ActionWithSchemas,
+  type ListedAction,
   type AiPackageActions,
   actionRefusalOf,
   type PluginDisclosure,
@@ -104,7 +104,7 @@ export interface ToolLoopOptions {
    * The assistant's own rule for a call, before it is proposed: a reason the
    * model is answered with instead, or null to let it through.
    */
-  readonly vet?: (action: ActionWithSchemas, input: unknown) => string | null;
+  readonly vet?: (action: ListedAction, input: unknown) => string | null;
   /**
    * Asked before each call to the model and each new proposal: false ends the
    * turn there as `failed`, with nothing more called or proposed.
@@ -265,7 +265,7 @@ export async function runToolLoop(
 }
 
 /** A tool as the model is told of it. */
-function toolOf(action: ActionWithSchemas): ModelTool {
+function toolOf(action: ListedAction): ModelTool {
   // The dialect marker is for a validator, and a provider may refuse a key it
   // does not take at the top of a tool's schema.
   const { $schema: _dialect, ...inputSchema } = action.inputSchema ?? {};

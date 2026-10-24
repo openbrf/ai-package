@@ -151,19 +151,27 @@ export interface ActionClient {
 }
 
 /**
- * `ActionWithSchemas`: one action as `host.actions.list` hands it to a plugin
- * (ADR 0038, "Schemas in process"), with the fields this package reads.
- *
- * A host older than the schemas lists the action without them, and the
- * package offers a model no tool it cannot describe.
+ * `ActionWithSchemas`: one action as `host.actions.list` offers it, with the
+ * fields this package reads and the JSON Schema of what it takes and what it
+ * returns (ADR 0038, "Schemas in process"). A host from before the schemas
+ * lists the summary alone, so both are optional here, and the package offers
+ * a model no tool it cannot describe.
  */
-export interface ActionWithSchemas {
+export interface ListedAction {
   readonly name: string;
   readonly title: string;
   readonly description: string;
   readonly group: string;
   readonly effect: "read" | "write" | "delete";
+  readonly personalData: readonly string[];
   readonly inputSchema?: Record<string, unknown>;
+  readonly outputSchema?: Record<string, unknown>;
+}
+
+/** `PluginActionFilter`. */
+export interface ListFilter {
+  readonly surface?: "ui" | "mcp" | "ai";
+  readonly group?: string;
 }
 
 /**
@@ -180,11 +188,8 @@ export interface PendingChangeReceipt {
 export type AiPackageActions = Omit<PluginHost["actions"], "list"> & {
   readonly list: (
     request: ActionRequest,
-    filter?: {
-      readonly surface?: "ui" | "mcp" | "ai";
-      readonly group?: string;
-    },
-  ) => Promise<readonly ActionWithSchemas[]>;
+    filter?: ListFilter,
+  ) => Promise<ListedAction[]>;
   readonly propose?: (
     request: ActionRequest,
     name: string,
@@ -194,45 +199,54 @@ export type AiPackageActions = Omit<PluginHost["actions"], "list"> & {
 };
 
 /**
- * `ActionRefusal`, with the fields this package hands a model: why the call
- * was refused, whether trying again could work, and for an input the action
- * refused, which fields. Never the input itself.
+ * `ActionRefusal`: what `host.actions.invoke` and `propose` reject with when
+ * the call was refused, with the fields this package hands a model. Never the
+ * input itself.
  */
-export interface ActionRefusalFinding {
+export interface ActionRefusalFields {
+  readonly kind: "registry" | "invalid-body" | "domain";
   readonly reason: string;
-  readonly retry: string;
+  readonly retry: "never" | "after-edit" | "after-backoff";
+  /**
+   * The particulars the refusal publishes, keyed by the field they travel in:
+   * `issues` on an invalid body, `scopes` on an insufficient scope.
+   */
   readonly details: Readonly<Record<string, readonly unknown[]>>;
+  /** For an invalid body, each failing field's path and message. */
+  readonly issues: readonly unknown[];
 }
 
 /**
- * The refusal an action call was answered with, or null for anything else.
- * Read by its name, as `isActionRefusal` in the SDK reads it, for the reason
- * `isRecordConflict` gives.
+ * The refusal an action call rejected with, or null when it failed rather than
+ * being refused. Read by its fields, as the SDK's `isActionRefusal` reads it:
+ * the host builds the error, and this bundle has no copy of its class.
  */
-export function actionRefusalOf(error: unknown): ActionRefusalFinding | null {
+export function actionRefusalOf(error: unknown): ActionRefusalFields | null {
   if (!(error instanceof Error) || error.name !== "ActionRefusal") {
     return null;
   }
-  const refusal = error as Error & {
-    reason?: unknown;
-    retry?: unknown;
-    details?: unknown;
-  };
-  if (typeof refusal.reason !== "string" || typeof refusal.retry !== "string") {
+  const { kind, reason, retry, details } = error as Error &
+    Partial<Record<"kind" | "reason" | "retry" | "details", unknown>>;
+  if (
+    (kind !== "registry" && kind !== "invalid-body" && kind !== "domain") ||
+    typeof reason !== "string" ||
+    (retry !== "never" && retry !== "after-edit" && retry !== "after-backoff")
+  ) {
     return null;
   }
-  let details: Readonly<Record<string, readonly unknown[]>> = {};
-  if (typeof refusal.details === "function") {
+  let published: Readonly<Record<string, readonly unknown[]>> = {};
+  if (typeof details === "function") {
     try {
-      const read: unknown = (refusal.details as () => unknown).call(error);
+      const read: unknown = (details as () => unknown).call(error);
       if (typeof read === "object" && read !== null) {
-        details = read as Record<string, readonly unknown[]>;
+        published = read as Record<string, readonly unknown[]>;
       }
     } catch {
       // A refusal whose details cannot be read is still a refusal.
     }
   }
-  return { reason: refusal.reason, retry: refusal.retry, details };
+  const issues = Array.isArray(published.issues) ? published.issues : [];
+  return { kind, reason, retry, details: published, issues };
 }
 
 /** The host object, with the members above where the host has them. */

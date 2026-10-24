@@ -33,7 +33,10 @@ afterEach(async () => {
   close = undefined;
 });
 
-async function readStatus(options: StandInOptions = {}): Promise<Response> {
+async function readStatus(
+  options: StandInOptions = {},
+  language?: string,
+): Promise<Response> {
   const { host } = standIn(options);
   const module = await createPlugin(host as unknown as PluginHost);
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -45,7 +48,10 @@ async function readStatus(options: StandInOptions = {}): Promise<Response> {
   await app.listen(0, "127.0.0.1");
   close = () => app.close();
   const { port } = app.getHttpServer().address() as { port: number };
-  return fetch(`http://127.0.0.1:${String(port)}/api/plugin/ai-package/status`);
+  return fetch(
+    `http://127.0.0.1:${String(port)}/api/plugin/ai-package/status`,
+    language === undefined ? {} : { headers: { "accept-language": language } },
+  );
 }
 
 describe("the status route", () => {
@@ -71,11 +77,32 @@ describe("the status route", () => {
     expect(JSON.stringify(body)).not.toContain("sk-ant-test-key");
   });
 
-  it("refuses a connected app, which learns nothing about the licence or the use", async () => {
-    const response = await readStatus({ connectedApp: true });
+  it.each([
+    ["en-GB", "A connected app cannot use the AI package."],
+    ["sv-SE", "En ansluten app kan inte använda AI-paketet."],
+  ])(
+    "refuses a connected app, which learns nothing about the licence or the use (%s)",
+    async (language, message) => {
+      const response = await readStatus({ connectedApp: true }, language);
 
-    expect(response.status).toBe(403);
+      expect(response.status).toBe(403);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({
+        statusCode: 403,
+        reason: "connected-app",
+        message,
+      });
+      expect(text).not.toContain("active");
+      expect(text).not.toContain("Anthropic");
+    },
+  );
+
+  it("refuses every request on a host that cannot say whether a connected app sent it", async () => {
+    const response = await readStatus({ without: ["actions.client"] }, "en");
+
+    expect(response.status).toBe(501);
     const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({ reason: "host-unsupported" });
     expect(text).not.toContain("active");
     expect(text).not.toContain("Anthropic");
   });
