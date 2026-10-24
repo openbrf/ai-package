@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   type DynamicModule,
+  ForbiddenException,
   Get,
   Headers,
   HttpCode,
@@ -17,6 +19,12 @@ import type {
   PluginModuleFactory,
 } from "@openbrf/plugin-sdk";
 
+import {
+  conversationOf,
+  runSiteTurn,
+  type SiteTurnResponse,
+} from "./assistant/site-assistant.ts";
+import { isTurnId, sentAtOf } from "./assistant/turns.ts";
 import {
   AssistantRefusal,
   type DocumentAnswer,
@@ -36,10 +44,11 @@ import {
 /**
  * The AI package's server entry point.
  *
- * It builds the gateway the assistants reach a model through and serves two
+ * It builds the gateway the assistants reach a model through and serves three
  * routes: `status`, which the board's screen reads (the licence finding, the
  * provider and model, whether a key is entered, and this month's use against
- * the limit), and `documents/ask`, the document assistant.
+ * the limit), `documents/ask`, the document assistant, and the site and news
+ * assistant's turns.
  *
  * The controllers take no constructor arguments: they close over the host
  * object instead. The bundler that builds this file does not emit the
@@ -125,9 +134,57 @@ export const createPlugin: PluginModuleFactory = (
   }
 
   /**
-   * The refusal of a request neither route serves, or null. A host without
-   * `actions.client` cannot say whether a connected app sent the request, so
-   * it is answered as a host older than the package, before anything is read.
+   * One turn of the site and news assistant: the conversation so far, ending
+   * with what the person last asked, answered with the model's reply and the
+   * changes it proposed.
+   *
+   * `site:manage`, the board's own grant for the news and the pages, so the
+   * route admits nobody the actions it reaches would refuse. A connected app
+   * is refused: its token would put the turn's calls on `mcp` rather than
+   * `ai`, and the assistant is the board's own screen. A host without
+   * `actions.client` cannot say which a request is, and is older than
+   * `actions.propose` as well, so the turn is answered `host-unsupported`.
+   */
+  @Controller("assistants/site")
+  @SetMetadata(REQUIRED_CAPABILITIES, ["site:manage"])
+  class SiteAssistantController {
+    @Post("turns")
+    @HttpCode(200)
+    async turn(
+      @Req() request: ActionRequest,
+      @Body() body: unknown,
+    ): Promise<SiteTurnResponse> {
+      if (host.actions.client === undefined) {
+        return { outcome: "host-unsupported" };
+      }
+      if (host.actions.client(request) !== null) {
+        throw new ForbiddenException();
+      }
+      const {
+        turnId,
+        sentAt: sent,
+        messages,
+      } = typeof body === "object" && body !== null
+        ? (body as Record<string, unknown>)
+        : {};
+      const conversation = conversationOf(messages);
+      const sentAt = sentAtOf(sent);
+      if (!isTurnId(turnId) || sentAt === null || conversation === null) {
+        throw new BadRequestException();
+      }
+      return runSiteTurn(host, gateway, request, {
+        turnId,
+        sentAt,
+        messages: conversation,
+      });
+    }
+  }
+
+  /**
+   * The refusal of a request the status and document routes do not serve, or
+   * null. A host without `actions.client` cannot say whether a connected app
+   * sent the request, so it is answered as a host older than the package,
+   * before anything is read.
    */
   function callerRefusal(
     request: ActionRequest,
@@ -146,7 +203,11 @@ export const createPlugin: PluginModuleFactory = (
 
   return {
     module: AiPackageModule,
-    controllers: [StatusController, DocumentAssistantController],
+    controllers: [
+      StatusController,
+      DocumentAssistantController,
+      SiteAssistantController,
+    ],
   };
 };
 

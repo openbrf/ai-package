@@ -210,8 +210,10 @@ describe("an answer from the documents", () => {
     const { assistant, provider, archive } = setup();
     archive.offered.push({
       name: "document_delete",
+      title: "Delete a document",
       description: "Deletes a document.",
       group: "documents",
+      effect: "delete",
       personalData: [],
       inputSchema: { type: "object" },
     });

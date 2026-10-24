@@ -6,6 +6,7 @@ import {
   ANTHROPIC_MODELS,
   MODEL_PROVIDER_RECIPIENT,
 } from "../src/anthropic.ts";
+import { SITE_DISCLOSURE } from "../src/assistant/site-assistant.ts";
 import {
   aiSettings,
   API_KEY_MAX_LENGTH,
@@ -40,6 +41,8 @@ const manifest = (
       recipients: { id: string; origin: string; personalData: string[] }[];
       licence: { entitlement: string };
       ai: boolean;
+      entry: { server: string; client?: string };
+      view?: { module: string; titleKey: string; section?: string };
     };
   }
 ).openbrf;
@@ -119,6 +122,31 @@ describe("the manifest", () => {
         personalData: manifest.personalData,
       }),
     ]);
+  });
+
+  it("declares every category the site assistant sends its model as one the recipient receives", () => {
+    // The host refuses a disclosure naming a category the recipient's
+    // declaration leaves out, before anything is sent.
+    const [recipient] = manifest.recipients;
+    expect(recipient?.personalData).toEqual(
+      expect.arrayContaining([...SITE_DISCLOSURE.personalData]),
+    );
+  });
+
+  it("offers its view in the board's section, under a title in both languages", () => {
+    expect(manifest.entry.client).toBe("./dist/remoteEntry.js");
+    expect(manifest.view).toEqual({
+      module: "./View",
+      titleKey: "view.title",
+      section: "board",
+    });
+    // The module the build exposes is the one the manifest names.
+    expect(
+      readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    ).toContain('exposes: { "./View": "./src/view/View.tsx" }');
+    for (const language of ["sv", "en"] as const) {
+      expect(keys(locales[language])).toContain("view.title");
+    }
   });
 
   it("reads the ai-package entitlement and declares itself an AI package", () => {
