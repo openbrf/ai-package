@@ -152,13 +152,17 @@ export interface ActionClient {
 
 /**
  * `ActionWithSchemas`: one action as `host.actions.list` offers it, with the
- * JSON Schema of what it takes and what it returns (ADR 0038). A host from
- * before the schemas lists the summary alone, so both are optional here.
+ * fields this package reads and the JSON Schema of what it takes and what it
+ * returns (ADR 0038, "Schemas in process"). A host from before the schemas
+ * lists the summary alone, so both are optional here, and the package offers
+ * a model no tool it cannot describe.
  */
 export interface ListedAction {
   readonly name: string;
+  readonly title: string;
   readonly description: string;
   readonly group: string;
+  readonly effect: "read" | "write" | "delete";
   readonly personalData: readonly string[];
   readonly inputSchema?: Record<string, unknown>;
   readonly outputSchema?: Record<string, unknown>;
@@ -170,26 +174,50 @@ export interface ListFilter {
   readonly group?: string;
 }
 
-/** `PluginActions`, with the listing's schemas and `client` where the host has them. */
+/**
+ * `PendingChangeReceipt`: what proposing a change answers with (ADR 0039).
+ * Nothing has run; the person confirms or rejects it at `path`.
+ */
+export interface PendingChangeReceipt {
+  readonly id: string;
+  readonly expiresAt: Date;
+  readonly path: string;
+}
+
+/** `PluginActions`, with the members newer than the SDK where the host has them. */
 export type AiPackageActions = Omit<PluginHost["actions"], "list"> & {
   readonly list: (
     request: ActionRequest,
     filter?: ListFilter,
   ) => Promise<ListedAction[]>;
+  readonly propose?: (
+    request: ActionRequest,
+    name: string,
+    input: unknown,
+  ) => Promise<PendingChangeReceipt>;
   readonly client?: (request: ActionRequest) => ActionClient | null;
 };
 
-/** `ActionRefusal`: what `host.actions.invoke` rejects with when it refused. */
+/**
+ * `ActionRefusal`: what `host.actions.invoke` and `propose` reject with when
+ * the call was refused, with the fields this package hands a model. Never the
+ * input itself.
+ */
 export interface ActionRefusalFields {
   readonly kind: "registry" | "invalid-body" | "domain";
   readonly reason: string;
   readonly retry: "never" | "after-edit" | "after-backoff";
+  /**
+   * The particulars the refusal publishes, keyed by the field they travel in:
+   * `issues` on an invalid body, `scopes` on an insufficient scope.
+   */
+  readonly details: Readonly<Record<string, readonly unknown[]>>;
   /** For an invalid body, each failing field's path and message. */
   readonly issues: readonly unknown[];
 }
 
 /**
- * The refusal an `invoke` rejected with, or null when it failed rather than
+ * The refusal an action call rejected with, or null when it failed rather than
  * being refused. Read by its fields, as the SDK's `isActionRefusal` reads it:
  * the host builds the error, and this bundle has no copy of its class.
  */
@@ -206,13 +234,19 @@ export function actionRefusalOf(error: unknown): ActionRefusalFields | null {
   ) {
     return null;
   }
-  let issues: readonly unknown[] = [];
+  let published: Readonly<Record<string, readonly unknown[]>> = {};
   if (typeof details === "function") {
-    const published = (details as () => unknown).call(error);
-    const listed = (published as { issues?: unknown } | null)?.issues;
-    issues = Array.isArray(listed) ? listed : [];
+    try {
+      const read: unknown = (details as () => unknown).call(error);
+      if (typeof read === "object" && read !== null) {
+        published = read as Record<string, readonly unknown[]>;
+      }
+    } catch {
+      // A refusal whose details cannot be read is still a refusal.
+    }
   }
-  return { kind, reason, retry, issues };
+  const issues = Array.isArray(published.issues) ? published.issues : [];
+  return { kind, reason, retry, details: published, issues };
 }
 
 /** The host object, with the members above where the host has them. */

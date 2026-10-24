@@ -54,9 +54,11 @@ export const SCANNED: StandInDocument = {
 const LISTED: readonly ListedAction[] = [
   {
     name: "document_list",
+    title: "List documents",
     description:
       "Lists the documents in the association's archive that this person may read.",
     group: "documents",
+    effect: "read",
     personalData: ["name", "freeText"],
     inputSchema: {
       type: "object",
@@ -71,8 +73,10 @@ const LISTED: readonly ListedAction[] = [
   },
   {
     name: "document_get",
+    title: "Read a document",
     description: "Reads the text of up to ten pages of one document.",
     group: "documents",
+    effect: "read",
     personalData: ["name", "freeText"],
     inputSchema: {
       type: "object",
