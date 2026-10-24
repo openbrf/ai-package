@@ -7,6 +7,7 @@ import {
   MODEL_PROVIDER_RECIPIENT,
 } from "../src/anthropic.ts";
 import { SITE_DISCLOSURE } from "../src/assistant/site-assistant.ts";
+import { TURN_KEPT_MS, TURN_REMEMBERED_MS } from "../src/assistant/turns.ts";
 import {
   aiSettings,
   API_KEY_MAX_LENGTH,
@@ -145,6 +146,55 @@ describe("the manifest", () => {
         expect(text?.[language]?.trim()).toBeTruthy();
         expect(text?.[language]?.length).toBeLessThanOrEqual(500);
       }
+    }
+  });
+
+  it("declares the assistant turn records and when they become eligible for clearing, in both languages", () => {
+    // The host shows this text on installation and seeds the record of
+    // processing activities from it, so it must name what the turns keep
+    // (see TurnValue) and the thresholds the sweep uses.
+    expect(TURN_KEPT_MS).toBe(60 * 60_000);
+    expect(TURN_REMEMBERED_MS).toBe(14 * 24 * 60 * 60_000);
+    const { retention } = manifest.processing;
+    const mentions = {
+      sv: [
+        /tider/,
+        /status/,
+        /kvitton/,
+        /\bid\b/,
+        /åtgärdens namn/,
+        /titel/,
+        /sökväg/,
+        /giltighetstid/,
+        /en timme/,
+        /två veckor/,
+        /senare anrop/,
+        /pågående sparas/,
+        /varken frågor, svar, ärenden eller föreslaget innehåll/,
+      ],
+      en: [
+        /times/,
+        /status/,
+        /receipts/,
+        /\bid\b/,
+        /action name/,
+        /title/,
+        /path/,
+        /expiry/,
+        /an hour/,
+        /two weeks/,
+        /later requests/,
+        /running ones are kept/,
+        /no questions, answers, issues or proposed content/,
+      ],
+    } as const;
+    for (const language of ["sv", "en"] as const) {
+      const text = retention[language] ?? "";
+      for (const pattern of mentions[language]) {
+        expect(text, `${language} retention: ${pattern}`).toMatch(pattern);
+      }
+      // Eligibility, not a promise of deletion at those times.
+      expect(text).not.toMatch(/\b(deleted|raderas)\b/);
     }
   });
 
