@@ -8,6 +8,7 @@ import {
   type PersonalDataCategory,
 } from "./host-contract.ts";
 import type { Language } from "./messages.ts";
+import { quotedData } from "./quoted-data.ts";
 import {
   type ModelMessage,
   type ModelTool,
@@ -35,9 +36,9 @@ import {
  * as the board member who asked and on the `ai` channel (ADR 0038 and ADR 0040
  * in openbrf/openbrf). The model is offered no action of the core's, only
  * `give_triage`, a tool of the package's own that ends the triage. The issue
- * reaches it as quoted data: JSON inside an `<issue>` element that the
- * reporter's text cannot close, under instructions that say it is data and
- * never an instruction.
+ * reaches it as quoted data (`quoted-data.ts`): JSON inside an `<issue>`
+ * element that the reporter's text cannot close, under instructions that
+ * say it is data and never an instruction.
  *
  * Nothing is kept: not the issue, not the suggestions, not the reply.
  */
@@ -437,11 +438,8 @@ export class IssueTriageAssistant {
 
 /**
  * The one message the model is given: the board member's language, the issue
- * and the active types, each as JSON in an element of its own.
- *
- * `<` is written as `<` inside the JSON, which reads the same to a JSON
- * parser and leaves the reporter no way to write `</issue>` and continue
- * outside it.
+ * and the active types, each as quoted data in an element of its own, which
+ * the reporter's text cannot close (`quoted-data.ts`).
  */
 export function triagePrompt(
   issue: Record<string, unknown>,
@@ -456,18 +454,10 @@ export function triagePrompt(
   return [
     `Triage the issue below. The board member reads ${LANGUAGE_NAMES[language]}.`,
     "",
-    "<issue>",
-    quoted(issue),
-    "</issue>",
+    quotedData("issue", issue),
     "",
-    "<issue_types>",
-    quoted(modelTypes),
-    "</issue_types>",
+    quotedData("issue_types", modelTypes),
   ].join("\n");
-}
-
-function quoted(value: unknown): string {
-  return JSON.stringify(value, null, 2).replace(/</g, "\\u003c");
 }
 
 /** The active types of `issue_type_list`'s answer, as the core names them. */
