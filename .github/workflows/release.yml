@@ -10,7 +10,7 @@
 #   }
 #
 # To release: move `source.json` to the commit to release in a pull request,
-# merge it, then push the tag from the merged commit:
+# merge it, then push the tag from main while main still pins that commit:
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #
@@ -26,29 +26,31 @@
 #
 # The package's prompt-injection evaluation is the release gate: it runs the
 # package's corpus of injections against every model the board may choose,
-# on the pinned commit, in the job that builds the release. A case that fails
-# fails that job, so nothing is attested or published. The evaluation is in
-# the source, so it runs here, as a step, and not as a workflow of its own
-# that this one calls.
+# on the pinned commit. A case that fails fails its job, so nothing is
+# attested or published. The evaluation is in the source, so it runs here, as
+# a job, and not as a workflow of its own that this one calls.
 #
-# Reading the source and running the evaluation take two credentials, held as
-# ADR 0044 requires:
+# The run takes three secrets of the `release` environment, which allows only
+# `v*` tags and waits for a maintainer's approval before each job that uses
+# it. The source's install, tests, evaluation and build run third-party code,
+# and any step of a job can read every secret that job references, so each
+# secret is in the fewest jobs that need it:
 #
-# - Both are secrets of the `release` environment, whose deployment rule
-#   allows only `v*` tags. `SOURCE_DEPLOY_KEY` is a read-only deploy key on
-#   apteoab/openbrf-modules: it reads every module in that repository, not
-#   only this package, and writes nothing. `ANTHROPIC_API_KEY` is a key of its
-#   own, in an Anthropic workspace of its own with a spend limit.
-# - The source is checked out with `persist-credentials: false`, so the deploy
-#   key is not left where the build could read it. The model provider key is
-#   handed to the evaluation's step alone, not to the install, where the
-#   dependencies' own install scripts run. The job still runs the source's
-#   install, tests, evaluation and build while it holds the deploy key, so
-#   both keys are rotated whenever a dependency of that build is reported
+# - `fetch` holds `SOURCE_DEPLOY_KEY`, a read-only deploy key on
+#   apteoab/openbrf-modules that reads every module there, not only this
+#   package. It runs no Node and installs nothing. It checks the pin, takes the
+#   pinned commit alone, without history, and seals it with
+#   `SOURCE_ARCHIVE_KEY`: an artifact of a public repository can be downloaded
+#   by anyone signed in to GitHub.
+# - `build` and `eval` hold `SOURCE_ARCHIVE_KEY` to unseal that commit. Only
+#   `eval` holds `ANTHROPIC_API_KEY`, a key of its own in an Anthropic
+#   workspace of its own with a spend limit, and only its evaluation step is
+#   handed it. `eval` installs without the dependencies' install scripts.
+#   Both keys are rotated whenever a dependency of the source is reported
 #   compromised.
-# - The job that holds the keys builds, without `id-token` or `attestations`.
-#   The job that attests and publishes has those and not the keys, and takes
-#   the tarball from the first.
+# - `publish` attests and publishes, with `id-token` and `attestations` and no
+#   secret. `cleanup` deletes the run's artifacts once it ends, however it
+#   ends.
 #
 # The pin is only a commit id, and outside reviewers cannot read the commit it
 # names. So the run builds nothing that is not on the source's `main`, and it
@@ -77,19 +79,24 @@ concurrency:
 permissions:
   contents: read
 
+# `bash` by name runs with `pipefail`, so a pipe fails when any part of it
+# does.
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  build:
-    name: Build and evaluate the pinned source
+  fetch:
+    name: Fetch the pinned source
     runs-on: ubuntu-24.04
-    # The evaluation makes a few calls to the model for each case, against
-    # every model, and waits for a busy provider.
-    timeout-minutes: 90
+    timeout-minutes: 10
     environment: release
     permissions:
       contents: read
     outputs:
-      file: ${{ steps.pack.outputs.file }}
       commit: ${{ steps.pin.outputs.commit }}
+      digest: ${{ steps.seal.outputs.digest }}
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -99,9 +106,9 @@ jobs:
           persist-credentials: false
 
       # A tag is cheap to push from anywhere, so the run refuses one that is
-      # not main's own commit. The pin's form is checked again, with the
-      # catalog's rules, by the source's own `release:pack`; this reads only
-      # the commit to check out.
+      # not on main, or whose pin is no longer main's. The pin's form is
+      # checked again, with the catalog's rules, by the source's own
+      # `release:pack`; this reads only the commit to fetch.
       - name: Read the pin
         id: pin
         working-directory: release
@@ -114,6 +121,10 @@ jobs:
           fi
           if [ ! -f source.json ]; then
             echo "::error::source.json is missing. Pin the commit to release in a pull request first."
+            exit 1
+          fi
+          if ! git show origin/main:source.json | cmp -s - source.json; then
+            echo "::error::source.json at $TAG is not the one on main. Tag a commit of main whose source.json is main's."
             exit 1
           fi
           commit=$(jq -er '.commit' source.json)
@@ -136,16 +147,95 @@ jobs:
           ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
           persist-credentials: false
 
-      - name: Check out the pinned commit
+      - name: Check the pinned commit
         working-directory: source
         env:
           COMMIT: ${{ steps.pin.outputs.commit }}
+          TAG: ${{ github.ref_name }}
         run: |
           if ! git merge-base --is-ancestor "$COMMIT" origin/main; then
             echo "::error::source.json pins $COMMIT, which is not on the main branch of apteoab/openbrf-modules. Pin a commit of main."
             exit 1
           fi
-          git checkout --quiet --detach "$COMMIT"
+          version=$(git show "$COMMIT:modules/ai-package/package.json" | jq -er '.version')
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::The tag is $TAG but the pinned commit's package states version $version."
+            exit 1
+          fi
+
+      # The pinned commit alone, without the history before it, in a
+      # repository of its own, so `release:pack` can tell that it builds that
+      # commit unchanged.
+      - name: Seal the pinned commit
+        id: seal
+        env:
+          COMMIT: ${{ steps.pin.outputs.commit }}
+          SOURCE_ARCHIVE_KEY: ${{ secrets.SOURCE_ARCHIVE_KEY }}
+        run: |
+          if [ -z "$SOURCE_ARCHIVE_KEY" ]; then
+            echo "::error::The release environment holds no SOURCE_ARCHIVE_KEY."
+            exit 1
+          fi
+          pinned="$RUNNER_TEMP/pinned"
+          git init --quiet "$pinned"
+          git -C "$pinned" fetch --quiet --depth 1 "$GITHUB_WORKSPACE/source" "$COMMIT"
+          git -C "$pinned" checkout --quiet --detach FETCH_HEAD
+          mkdir "$RUNNER_TEMP/sealed"
+          sealed="$RUNNER_TEMP/sealed/source.tgz.enc"
+          tar -C "$pinned" -czf - . |
+            openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SOURCE_ARCHIVE_KEY -out "$sealed"
+          echo "digest=$(sha256sum "$sealed" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: source
+          path: ${{ runner.temp }}/sealed/source.tgz.enc
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Test and pack the pinned source
+    needs: fetch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+    outputs:
+      file: ${{ steps.pack.outputs.file }}
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      # For the pin `release:pack` copies into the package.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: release
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: source
+          path: ${{ runner.temp }}/sealed
+
+      - name: Unseal the pinned commit
+        env:
+          COMMIT: ${{ needs.fetch.outputs.commit }}
+          DIGEST: ${{ needs.fetch.outputs.digest }}
+          SOURCE_ARCHIVE_KEY: ${{ secrets.SOURCE_ARCHIVE_KEY }}
+        run: |
+          sealed="$RUNNER_TEMP/sealed/source.tgz.enc"
+          if [ "$(sha256sum "$sealed" | cut -d ' ' -f 1)" != "$DIGEST" ]; then
+            echo "::error::The sealed source is not the one the fetch job sealed."
+            exit 1
+          fi
+          mkdir source
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SOURCE_ARCHIVE_KEY -in "$sealed" |
+            tar -C source -xzf -
+          rm "$sealed"
+          if [ "$(git -C source rev-parse HEAD)" != "$COMMIT" ] || [ -n "$(git -C source status --porcelain)" ]; then
+            echo "::error::The unsealed source is not the pinned commit $COMMIT."
+            exit 1
+          fi
 
       # The pnpm version is read from `packageManager` in the source's
       # package.json.
@@ -159,17 +249,6 @@ jobs:
         with:
           node-version-file: source/.nvmrc
 
-      - name: Check the version
-        working-directory: source/modules/ai-package
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          version=$(node -p 'require("./package.json").version')
-          if [ "$TAG" != "v$version" ]; then
-            echo "::error::The tag is $TAG but the pinned commit's package states version $version."
-            exit 1
-          fi
-
       - name: Install dependencies
         working-directory: source
         run: |
@@ -178,13 +257,87 @@ jobs:
             exit 1
           fi
 
-      # Before the evaluation, so a commit that does not build spends no
-      # tokens.
       - name: Typecheck and test
         working-directory: source/modules/ai-package
         run: |
           if ! { pnpm typecheck && pnpm test; } > "$RUNNER_TEMP/test.log" 2>&1; then
             echo "::error::The typecheck or the tests failed. Their output is kept out of this public log: run pnpm typecheck and pnpm test in a checkout of the pinned commit to see why."
+            exit 1
+          fi
+
+      # Builds from scratch with the pin copied in, packs, and runs the
+      # package check over the very tarball handed on.
+      - name: Pack
+        id: pack
+        working-directory: source/modules/ai-package
+        run: |
+          if ! pnpm release:pack "$GITHUB_WORKSPACE/release/source.json" "$RUNNER_TEMP/release" > "$RUNNER_TEMP/pack.log" 2>&1; then
+            echo "::error::Building or packing failed. The output is kept out of this public log: run pnpm release:pack in a checkout of the pinned commit to see why."
+            exit 1
+          fi
+          file=$(cd "$RUNNER_TEMP/release" && ls -- *.tgz)
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: tarball
+          path: ${{ runner.temp }}/release/${{ steps.pack.outputs.file }}
+          if-no-files-found: error
+          retention-days: 1
+
+  eval:
+    name: Evaluate the pinned source
+    needs: fetch
+    runs-on: ubuntu-24.04
+    # The evaluation makes a few calls to the model for each case, against
+    # every model, and waits for a busy provider.
+    timeout-minutes: 90
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: source
+          path: ${{ runner.temp }}/sealed
+
+      - name: Unseal the pinned commit
+        env:
+          COMMIT: ${{ needs.fetch.outputs.commit }}
+          DIGEST: ${{ needs.fetch.outputs.digest }}
+          SOURCE_ARCHIVE_KEY: ${{ secrets.SOURCE_ARCHIVE_KEY }}
+        run: |
+          sealed="$RUNNER_TEMP/sealed/source.tgz.enc"
+          if [ "$(sha256sum "$sealed" | cut -d ' ' -f 1)" != "$DIGEST" ]; then
+            echo "::error::The sealed source is not the one the fetch job sealed."
+            exit 1
+          fi
+          mkdir source
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SOURCE_ARCHIVE_KEY -in "$sealed" |
+            tar -C source -xzf -
+          rm "$sealed"
+          if [ "$(git -C source rev-parse HEAD)" != "$COMMIT" ] || [ -n "$(git -C source status --porcelain)" ]; then
+            echo "::error::The unsealed source is not the pinned commit $COMMIT."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: source/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: source/.nvmrc
+
+      # Without the dependencies' install scripts: the evaluation builds
+      # nothing, and no script runs in the job that holds the model provider
+      # key before the evaluation itself.
+      - name: Install dependencies
+        working-directory: source
+        run: |
+          if ! pnpm install --frozen-lockfile --ignore-scripts > "$RUNNER_TEMP/install.log" 2>&1; then
+            echo "::error::Installing the dependencies failed. Their output is kept out of this public log: run pnpm install --frozen-lockfile --ignore-scripts in a checkout of the pinned commit to see why."
             exit 1
           fi
 
@@ -203,29 +356,9 @@ jobs:
             exit 1
           fi
 
-      # Builds from scratch with the pin copied in, packs, and runs the
-      # package check over the very tarball handed on.
-      - name: Pack
-        id: pack
-        working-directory: source/modules/ai-package
-        run: |
-          if ! pnpm release:pack "$GITHUB_WORKSPACE/release/source.json" "$RUNNER_TEMP/release" > "$RUNNER_TEMP/pack.log" 2>&1; then
-            echo "::error::Building or packing failed. The output is kept out of this public log: run pnpm release:pack in a checkout of the pinned commit to see why."
-            exit 1
-          fi
-          file=$(cd "$RUNNER_TEMP/release" && ls -- *.tgz)
-          echo "file=$file" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: tarball
-          path: ${{ runner.temp }}/release/${{ steps.pack.outputs.file }}
-          if-no-files-found: error
-          retention-days: 1
-
   publish:
     name: Attest and release
-    needs: build
+    needs: [fetch, build, eval]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -252,7 +385,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           FILE: ${{ runner.temp }}/release/${{ needs.build.outputs.file }}
-          COMMIT: ${{ needs.build.outputs.commit }}
+          COMMIT: ${{ needs.fetch.outputs.commit }}
         run: |
           gh release create "$TAG" "$FILE" \
             --repo "$GITHUB_REPOSITORY" \
@@ -273,3 +406,25 @@ jobs:
             echo "- sha512: \`sha512-$(openssl dgst -sha512 -binary "$FILE" | base64 -w0)\`"
             echo "- bytes: \`$(stat -c %s "$FILE")\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Sealed or not, nothing of a run stays downloadable longer than the run:
+  # the tarball of a release that failed its evaluation is not to be had
+  # either.
+  cleanup:
+    name: Delete the run's artifacts
+    needs: [fetch, build, eval, publish]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete the artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ needs.fetch.outputs.artifact }}
+          TARBALL: ${{ needs.build.outputs.artifact }}
+        run: |
+          for id in $SOURCE $TARBALL; do
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+          done

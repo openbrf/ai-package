@@ -37,8 +37,8 @@ been released yet.
   text the assistants read, and such text may try to make the model act. The
   package's evaluation runs a corpus of such text against every model the
   board may choose, and passes on what the model does, not on what it says.
-  The workflow runs it in the job that builds the release, and a case that
-  fails stops the release before anything is attested or published.
+  The workflow runs it on the commit it builds, and a case that fails stops
+  the release before anything is attested or published.
 
 ## Releasing
 
@@ -52,33 +52,47 @@ been released yet.
    }
    ```
 
-2. Merge it, then push the tag `v<version>` from the merged commit. The
-   version is the one the pinned commit's package states.
+2. Merge it, then push the tag `v<version>` from `main` while `source.json`
+   there still pins that commit. The version is the one the pinned commit's
+   package states.
+3. Approve the run in the `release` environment twice: before it fetches the
+   source, and again before it builds and evaluates it.
 
-The workflow refuses a tag that is not on `main` or does not match the
-version, and a pin that is not on the main branch of apteoab/openbrf-modules.
-It checks out the pinned commit, runs the package's typecheck and tests, then
-its prompt-injection evaluation, packs it with the pin copied in unchanged,
-attests the tarball and publishes the release. Its job summary gives the
-sha512 and size for the catalog entry. Every release pays for one run of the
-evaluation, on the model provider key below.
+The workflow refuses a tag that is not on `main`, whose `source.json` is not
+`main`'s, or that does not match the version, and a pin that is not on the
+main branch of apteoab/openbrf-modules. It fetches the pinned commit in a job
+that runs none of the source's code, then runs the package's typecheck and
+tests and its prompt-injection evaluation in jobs of their own, packs it with
+the pin copied in unchanged, attests the tarball and publishes the release. Its
+job summary gives the sha512 and size for the catalog entry. Every release pays
+for one run of the evaluation, on the model provider key below.
 
 The run logs of this repository are public, so the output of the source's
 dependency install, typecheck, tests, evaluation and build stays out of them.
 A failed release says which step failed; running that step in a checkout of
-the pinned commit shows why.
+the pinned commit shows why. The source passes from one job to the next only
+encrypted, and the run deletes its artifacts when it ends.
 
 The workflow relies on these repository settings:
 
 - releases are immutable;
 - a tag ruleset lets only the maintainers create a `v*` tag, and nobody move or
   delete one;
-- the `release` environment allows only `v*` tags and holds two secrets:
+- a branch ruleset on `main` requires a pull request approved by someone other
+  than its author, and refuses force pushes and deletion;
+- the `release` environment allows only `v*` tags, and a maintainer approves
+  each run's jobs in it. It holds three secrets:
   - `SOURCE_DEPLOY_KEY`, a read-only deploy key on apteoab/openbrf-modules.
     The key reads every module in that repository, not only this package;
+  - `SOURCE_ARCHIVE_KEY`, a random key that encrypts the source the run hands
+    from one job to the next;
   - `ANTHROPIC_API_KEY`, a key of its own for the evaluation, in an Anthropic
     workspace of its own with a spend limit;
-- the repository holds no secret of either name outside that environment.
+- the repository and its organisation hold no secret of these names outside
+  that environment, and the repository has no other environment. Branches from
+  before the source moved have an evaluation workflow of their own that reads
+  `ANTHROPIC_API_KEY` from an `injection-eval` environment; that environment
+  does not exist and is not to be created.
 
 ## Licence
 
@@ -95,4 +109,5 @@ source and is not covered by it.
 ## Contributing
 
 Commit messages and pull request titles follow
-[Conventional Commits](https://www.conventionalcommits.org/).
+[Conventional Commits](https://www.conventionalcommits.org/). `pnpm test`
+checks which jobs of the release workflow can read each secret.
