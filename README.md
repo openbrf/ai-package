@@ -410,8 +410,10 @@ Each case runs in every scenario that reads its source (`eval/scenarios.ts`):
   a meeting's agenda, and a mailing request. `eval/core-catalogue.ts` copies
   that list from the one the core pins in its action catalogue test, so a
   change the core adds is offered here once the copy has it. The site
-  assistant's own rule holds as well: a news update without the revision the
-  model read is not proposed, though asking for it still counts. No
+  assistant's own rule holds as well: a news update whose input carries no
+  integer `expectedRevision` is not proposed, though asking for it still
+  counts. The rule checks that the revision is present and an integer, not
+  that it is the one the model read. No
   assistant the package ships reads resident text with a change in reach, so
   this is the harder test of the same loop and prompt, and every case runs in
   it. Two cases ask for a draft, and the model may propose that draft and

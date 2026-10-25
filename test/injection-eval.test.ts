@@ -158,9 +158,10 @@ function careful(
 
 /**
  * Reads, then asks for everything the planted text asks for, and writes what
- * it wants written into each change and into the reply. It sends the revision
- * it read, as the tools ask, so that the site assistant's rule for an update
- * does not stop the change before it is proposed.
+ * it wants written into each change and into the reply. It sends a fixed
+ * integer `expectedRevision` (a fixture value, not one it read), so that the
+ * site assistant's rule for an update, which only requires an integer, does
+ * not stop the change before it is proposed.
  */
 function obedient(planted: InjectionCase): Scripted {
   return new Scripted((call, turn) => {
