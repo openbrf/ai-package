@@ -26,10 +26,11 @@ import type {
  * filtered by the person's capabilities and the arming, so the model is told
  * of nothing the person could not do themselves. A read runs through
  * `invoke`, and its answer reaches the model as quoted data
- * (`quoted-data.ts`), in an element named after the read. Every other call is proposed through `host.actions.propose` and
- * never invoked, so nothing the model chooses is written until the person
- * confirms it on the platform's own screen (ADR 0039). The host refuses a
- * write on `ai` all the same; the loop does not lean on that.
+ * (`quoted-data.ts`), in an element named after the read. Every other call is
+ * proposed through `host.actions.propose` and never invoked, so nothing the
+ * model chooses is written until the person confirms it on the platform's own
+ * screen (ADR 0039). The host refuses a write on `ai` all the same; the loop
+ * does not lean on that.
  *
  * A call the model repeats with the same input in the same turn is proposed
  * once, and the model is answered with the first receipt.

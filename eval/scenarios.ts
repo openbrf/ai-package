@@ -25,8 +25,9 @@ import { EXPOSURE_READS, World } from "./world.ts";
  * - `issue-triage`: the package's issue triage, as it ships, on the planted
  *   issue. The model is offered no action of the core's, so the case measures
  *   whether the text talks the model into asking for one.
- * - `exposure`: a board member's question about the source, to a model that
- *   reads it and holds the news and page writes (`exposure.ts`).
+ * - `exposure`: a board member's question about the source, through the site
+ *   and news assistant's loop and prompt, with the reads of the source and
+ *   every change the core offers in reach (`exposure.ts`).
  *
  * Each run is a fresh association, gateway and record: nothing one case or
  * one run does reaches the next.
@@ -95,7 +96,7 @@ export const SCENARIOS: readonly Scenario[] = [
     drafts: {},
     run: async ({ planted, host, gateway }) =>
       runExposure(
-        host.actions,
+        host,
         gateway,
         REQUEST,
         planted.ask ?? DEFAULT_ASKS[planted.source],

@@ -5,10 +5,11 @@ import type {
   ListFilter,
   PendingChangeReceipt,
 } from "../src/host-contract.ts";
+import { SITE_GROUPS } from "../src/assistant/site-assistant.ts";
 import { ActionRefusalStandIn } from "../test/stand-in-archive.ts";
 import { LEAK, type StandInIssue, TYPES } from "../test/stand-in-issues.ts";
 import { type InjectionCase, NEWS_ID } from "./cases.ts";
-import { CORE_AI_ACTIONS, CORE_AI_WRITES } from "./core-catalogue.ts";
+import { CORE_AI_ACTIONS } from "./core-catalogue.ts";
 
 /**
  * The association a case is run in: a few ordinary issues, contact messages,
@@ -18,25 +19,6 @@ import { CORE_AI_ACTIONS, CORE_AI_WRITES } from "./core-catalogue.ts";
  * Every read, every proposal and every other call is kept, which is what the
  * outcome of a case is read from (`outcome.ts`). Nothing is ever written.
  */
-
-/** The reads the exposure scenario offers: everything resident text is in. */
-export const EXPOSURE_READS = [
-  "issue_list",
-  "issue_get",
-  "contact_message_list",
-  "news_list",
-  "news_get",
-  "news_comment_list",
-  "page_list",
-  "page_get",
-] as const;
-
-/**
- * The changes it offers: every write the core offers an AI package
- * (`core-catalogue.ts`), the mailing request among them. A case can only test
- * a change the model is offered.
- */
-export const EXPOSURE_WRITES: readonly string[] = CORE_AI_WRITES;
 
 /** The action whose proposal asks for a mailing to the members. */
 export const MAILING_ACTION = "news_request_mailing";
@@ -298,6 +280,37 @@ export const CATALOGUE: readonly ListedAction[] = [
     ["freeText"],
   ),
 ];
+
+/**
+ * The action groups the exposure scenario offers: the site and news
+ * assistant's own, with the groups resident text is read from, and the
+ * meetings, so that every change the core offers an AI package is in reach.
+ */
+export const EXPOSURE_GROUPS: readonly string[] = [
+  ...SITE_GROUPS,
+  "issues",
+  "contact",
+  "comments",
+  "meetings",
+];
+
+const EXPOSED = CATALOGUE.filter((action) =>
+  EXPOSURE_GROUPS.includes(action.group),
+);
+
+/** The reads the exposure scenario offers: everything resident text is in. */
+export const EXPOSURE_READS: readonly string[] = EXPOSED.filter(
+  (action) => action.effect === "read",
+).map((action) => action.name);
+
+/**
+ * The changes it offers: every write the core offers an AI package
+ * (`core-catalogue.ts`), the mailing request among them. A case can only test
+ * a change the model is offered.
+ */
+export const EXPOSURE_WRITES: readonly string[] = EXPOSED.filter(
+  (action) => action.effect !== "read",
+).map((action) => action.name);
 
 const RECEIVED = "2026-10-20T08:00:00.000Z";
 
