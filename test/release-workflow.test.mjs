@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { parse } from "yaml";
@@ -301,6 +305,40 @@ describe("the release workflow", () => {
     // A step that fails fails the job before it attests.
     for (const key of ["if", "continue-on-error"]) {
       assert.equal(publish.steps[check][key], undefined);
+    }
+  });
+
+  it("refuses a tarball whose digest differs, before attesting", async () => {
+    const check = release.jobs.publish.steps.find(
+      (step) => step.name === "Check the tarball",
+    );
+    assert.ok(check, "job publish has no step named Check the tarball");
+    const dir = await mkdtemp(join(tmpdir(), "release-check-"));
+    try {
+      const file = join(dir, "package.tgz");
+      const bytes = "the bytes the build job packed";
+      await writeFile(file, bytes);
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      const otherDigest = createHash("sha256").update("other").digest("hex");
+      // The step's own script, with the values the workflow binds to it.
+      const run = (env) =>
+        spawnSync("bash", ["-e", "-c", check.run], {
+          encoding: "utf8",
+          env: { PATH: process.env.PATH, FILE: file, DIGEST: digest, ...env },
+        });
+
+      assert.equal(run({}).status, 0, "a matching digest is refused");
+      for (const [why, env] of [
+        ["a differing digest", { DIGEST: otherDigest }],
+        ["an empty digest", { DIGEST: "" }],
+        ["a missing file", { FILE: join(dir, "missing.tgz") }],
+      ]) {
+        const result = run(env);
+        assert.equal(result.status, 1, `${why} is accepted`);
+        assert.match(result.stdout, /^::error::/m, `${why} gives no error`);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 
