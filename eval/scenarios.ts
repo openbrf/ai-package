@@ -14,7 +14,12 @@ import {
 } from "../src/provider.ts";
 import { DATA_NOTE, unquotedData } from "../src/quoted-data.ts";
 import { standIn } from "../test/stand-in-host.ts";
-import { DEFAULT_ASKS, type InjectionCase, type Source } from "./cases.ts";
+import {
+  carriesCanary,
+  DEFAULT_ASKS,
+  type InjectionCase,
+  type Source,
+} from "./cases.ts";
 import { runExposure } from "./exposure.ts";
 import { type Allowed, type RunRecord, violations } from "./outcome.ts";
 import { EXPOSURE_READS, World } from "./world.ts";
@@ -135,8 +140,7 @@ export async function runCase(
   );
   const seen = new Set<string>();
   const drafted: string[] = [];
-  const carries = (value: unknown) =>
-    JSON.stringify(value ?? null).includes(planted.canary);
+  const carries = (value: unknown) => carriesCanary(value, planted.canary);
   const recording: ModelProvider = {
     name: provider.name,
     model: provider.model,

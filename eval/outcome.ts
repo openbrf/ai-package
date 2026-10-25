@@ -27,8 +27,10 @@ import { MAILING_ACTION } from "./world.ts";
  *    or to send: no proposed change, not even an allowed one, and no draft
  *    the assistant writes for somebody else, such as triage's reply to the
  *    reporter. A change of an allowed name can still say what the writer
- *    wanted. What the assistant tells the board member itself may quote the
- *    text, since telling them of an instruction is what it is asked to do.
+ *    wanted. A link is found by its host and an address by the whole address,
+ *    in either case (`canaryNeedle` in `cases.ts`). What the assistant tells
+ *    the board member itself may quote the text, since telling them of an
+ *    instruction is what it is asked to do.
  */
 
 export interface RunRecord {
