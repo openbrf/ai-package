@@ -1,6 +1,7 @@
 import {
   type FormEvent,
   type ReactElement,
+  type ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -33,7 +34,11 @@ import { NAMESPACE, styles } from "./styles.ts";
  *
  * One draft of each kind at a time, and an answer is shown only if it
  * belongs to the latest request of its kind, so an answer that arrives late
- * never replaces a newer one.
+ * never replaces a newer one. A refusal is shown only for what is still on
+ * the screen: once the meeting or the text has changed, a refusal of the
+ * earlier request is dropped, as it says nothing of the new one. A draft is
+ * kept, with the meeting it was written for, and so is an agenda request that
+ * got no answer, as a pending change may exist all the same.
  */
 
 const ROUTE = "/api/plugin/ai-package/meetings";
@@ -235,18 +240,62 @@ function pendingChangeHref(path: string): string {
     : PENDING_CHANGES_PATH;
 }
 
-/** The meeting as the board member knows it: its kind and its day. */
-function useMeetingName(): (meeting: Meeting) => string {
-  const { t, i18n } = useTranslation(NAMESPACE);
-  return (meeting) => {
-    const day = /^\d{4}-\d{2}-\d{2}$/.test(meeting.heldOn)
+/** Stands for a date or a meeting in a translated sentence, to set it apart. */
+const MARK = "\uE000";
+
+/**
+ * A translated sentence with `node` in place of its `MARK`. A date is
+ * register data, set in the data face, and a sentence set in the UI face
+ * cannot hold one.
+ */
+function fillIn(sentence: string, node: ReactNode): ReactElement {
+  const at = sentence.indexOf(MARK);
+  return at < 0 ? (
+    <>
+      {sentence} {node}
+    </>
+  ) : (
+    <>
+      {sentence.slice(0, at)}
+      {node}
+      {sentence.slice(at + MARK.length)}
+    </>
+  );
+}
+
+/** A date, in the data face. */
+function Day({ children }: { children: string }): ReactElement {
+  return <span style={styles.data}>{children}</span>;
+}
+
+/** The day a meeting is held, as the board member reads it. */
+function useMeetingDay(): (meeting: Meeting) => string {
+  const { i18n } = useTranslation(NAMESPACE);
+  return (meeting) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(meeting.heldOn)
       ? new Intl.DateTimeFormat(i18n.language, {
           dateStyle: "long",
           timeZone: "UTC",
         }).format(new Date(`${meeting.heldOn}T00:00:00Z`))
       : meeting.heldOn;
-    return t(`meetings.kind.${meeting.kind}`, { date: day });
-  };
+}
+
+/** The meeting as the board member knows it: its kind and its day. */
+function useMeetingName(): (meeting: Meeting) => string {
+  const { t } = useTranslation(NAMESPACE);
+  const dayOf = useMeetingDay();
+  return (meeting) =>
+    t(`meetings.kind.${meeting.kind}`, { date: dayOf(meeting) });
+}
+
+/** The meeting's name as text of its own, with its day in the data face. */
+function MeetingName({ meeting }: { meeting: Meeting }): ReactElement {
+  const { t } = useTranslation(NAMESPACE);
+  const dayOf = useMeetingDay();
+  return fillIn(
+    t(`meetings.kind.${meeting.kind}`, { date: MARK }),
+    <Day>{dayOf(meeting)}</Day>,
+  );
 }
 
 function FailureNotice({
@@ -331,6 +380,9 @@ function AgendaDraftForm({
   const [state, setState] = useState<AgendaState>({ status: "idle" });
   const latest = useRef(0);
   const inFlight = useRef(false);
+  // Counts the changes to what is asked, to tell a refusal of what is still
+  // on the screen from one of what has been changed since.
+  const inputs = useRef(0);
 
   useEffect(
     () => () => {
@@ -342,10 +394,17 @@ function AgendaDraftForm({
 
   const chosen = arranged.find((meeting) => meeting.id === meetingId);
 
-  /** A refusal belongs to what was asked, so a new choice clears it. */
-  const clearFailure = (): void => {
+  /**
+   * A refusal belongs to what was asked, so a new choice clears it, and one
+   * that arrives later is dropped. An answer that never came stays: a
+   * proposal may exist for the meeting it was asked for.
+   */
+  const changed = (): void => {
+    inputs.current += 1;
     setState((current) =>
-      current.status === "failed" ? { status: "idle" } : current,
+      current.status === "failed" && current.failure.kind !== "unanswered"
+        ? { status: "idle" }
+        : current,
     );
   };
 
@@ -357,6 +416,7 @@ function AgendaDraftForm({
     inFlight.current = true;
     const request = ++latest.current;
     const meeting = chosen;
+    const revision = inputs.current;
     setState({ status: "sending" });
     const asked = instructions.trim();
     const answer = await call(
@@ -372,6 +432,14 @@ function AgendaDraftForm({
     );
     inFlight.current = false;
     if (request !== latest.current) {
+      return;
+    }
+    if (
+      !answer.ok &&
+      answer.failure.kind !== "unanswered" &&
+      revision !== inputs.current
+    ) {
+      setState({ status: "idle" });
       return;
     }
     setState(
@@ -405,7 +473,7 @@ function AgendaDraftForm({
             style={styles.select}
             onChange={(event) => {
               setMeetingId(event.target.value);
-              clearFailure();
+              changed();
             }}
           >
             {arranged.map((meeting) => (
@@ -429,7 +497,7 @@ function AgendaDraftForm({
             style={styles.textarea}
             onChange={(event) => {
               setInstructions(event.target.value);
-              clearFailure();
+              changed();
             }}
           />
           <div style={styles.toolbar}>
@@ -452,6 +520,15 @@ function AgendaDraftForm({
 
       {state.status === "failed" ? (
         <div style={styles.toolbar}>
+          {state.failure.kind === "unanswered" ? (
+            // The meeting may no longer be the one chosen above.
+            <p style={styles.who}>
+              {fillIn(
+                t("meetings.agenda.askedFor", { meeting: MARK }),
+                <MeetingName meeting={state.meeting} />,
+              )}
+            </p>
+          ) : null}
           <FailureNotice
             failure={state.failure}
             unanswered="meetings.error.agendaUnanswered"
@@ -475,12 +552,14 @@ function AgendaResult({
   draft: AgendaDraft;
 }): ReactElement {
   const { t, i18n } = useTranslation(NAMESPACE);
-  const nameOf = useMeetingName();
   const expires = new Date(draft.pendingChange.expiresAt);
   return (
     <section style={styles.entry} aria-live="polite">
       <p style={styles.proposalsHeading}>
-        {t("meetings.agenda.resultHeading", { meeting: nameOf(meeting) })}
+        {fillIn(
+          t("meetings.agenda.resultHeading", { meeting: MARK }),
+          <MeetingName meeting={meeting} />,
+        )}
       </p>
       <ol style={styles.items}>
         {draft.items.map((item, index) => (
@@ -507,11 +586,14 @@ function AgendaResult({
           </a>
           {Number.isNaN(expires.getTime()) ? null : (
             <span style={styles.muted}>
-              {t("meetings.agenda.expires", {
-                date: new Intl.DateTimeFormat(i18n.language, {
-                  dateStyle: "long",
-                }).format(expires),
-              })}
+              {fillIn(
+                t("meetings.agenda.expires", { date: MARK }),
+                <Day>
+                  {new Intl.DateTimeFormat(i18n.language, {
+                    dateStyle: "long",
+                  }).format(expires)}
+                </Day>,
+              )}
             </span>
           )}
         </div>
@@ -554,6 +636,8 @@ function MinutesDraftForm({
   const [copied, setCopied] = useState<Copied>(null);
   const latest = useRef(0);
   const inFlight = useRef(false);
+  // As in the agenda form: a refusal of what has been changed since is dropped.
+  const inputs = useRef(0);
 
   useEffect(
     () => () => {
@@ -564,7 +648,8 @@ function MinutesDraftForm({
 
   const chosen = meetings.find((meeting) => meeting.id === meetingId);
 
-  const clearFailure = (): void => {
+  const changed = (): void => {
+    inputs.current += 1;
     setState((current) =>
       current.status === "failed" ? { status: "idle" } : current,
     );
@@ -579,6 +664,7 @@ function MinutesDraftForm({
     inFlight.current = true;
     const request = ++latest.current;
     const meeting = chosen;
+    const revision = inputs.current;
     setState({ status: "sending" });
     setCopied(null);
     const answer = await call(
@@ -594,6 +680,12 @@ function MinutesDraftForm({
     );
     inFlight.current = false;
     if (request !== latest.current) {
+      return;
+    }
+    // A draft is kept, and the notes it was written from are noted as
+    // changed. Nothing is kept of a failure: asking again costs nothing.
+    if (!answer.ok && revision !== inputs.current) {
+      setState({ status: "idle" });
       return;
     }
     setState(
@@ -642,7 +734,7 @@ function MinutesDraftForm({
           style={styles.select}
           onChange={(event) => {
             setMeetingId(event.target.value);
-            clearFailure();
+            changed();
           }}
         >
           {meetings.map((meeting) => (
@@ -666,7 +758,7 @@ function MinutesDraftForm({
           style={styles.textarea}
           onChange={(event) => {
             setNotes(event.target.value);
-            clearFailure();
+            changed();
           }}
         />
         <div style={styles.toolbar}>
@@ -696,9 +788,10 @@ function MinutesDraftForm({
       {state.status === "drafted" ? (
         <section style={styles.entry} aria-live="polite">
           <label htmlFor="ai-package-minutes-draft" style={styles.label}>
-            {t("meetings.minutes.resultHeading", {
-              meeting: nameOf(state.meeting),
-            })}
+            {fillIn(
+              t("meetings.minutes.resultHeading", { meeting: MARK }),
+              <MeetingName meeting={state.meeting} />,
+            )}
           </label>
           {state.draft.complete ? null : (
             <p style={styles.notice}>{t("meetings.minutes.cutShort")}</p>

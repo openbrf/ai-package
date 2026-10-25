@@ -80,6 +80,9 @@ export const styles = {
     paddingTop: "0.5rem",
     borderTop: "1px solid var(--obrf-border-subtle)",
   },
+  // A date is register data: the monospace face, never the UI face (DESIGN.md,
+  // "The Mono-Grid Rule").
+  data: { fontFamily: "var(--obrf-font-data)" },
   proposalsHeading: { margin: 0, fontSize: "0.875rem", fontWeight: 600 },
   proposal: {
     display: "flex",
@@ -106,9 +109,13 @@ export const styles = {
     borderRadius: "var(--obrf-radius-control)",
     resize: "vertical",
   },
+  // Every option names a meeting by its day, and an option holds no markup
+  // to set the day apart, so the whole selector is set in the data face.
+  // `fontFamily` follows the `font` shorthand so that it wins.
   select: {
     minHeight: TOUCH,
     font: "inherit",
+    fontFamily: "var(--obrf-font-data)",
     fontSize: "0.9375rem",
     padding: "0.25rem 0.75rem",
     color: "var(--obrf-text-primary)",

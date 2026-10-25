@@ -189,6 +189,14 @@ function minutesForm(): HTMLElement {
     .closest("div") as HTMLElement;
 }
 
+/** A paragraph by all of its text: a date in it is an element of its own. */
+function paragraph(text: string): HTMLElement {
+  return screen.getByText(
+    (_content, element) =>
+      element?.tagName === "P" && element.textContent === text,
+  );
+}
+
 function askAgenda(request = ""): void {
   const form = agendaForm();
   if (request !== "") {
@@ -271,7 +279,11 @@ describe("meeting support's view", () => {
         .map((item) => item.textContent),
     ).toEqual(AGENDA.items.map((item) => item.title));
     expect(within(result).getByText(AGENDA.note)).toBeTruthy();
-    expect(within(result).getByText("Förfaller 31 oktober 2026")).toBeTruthy();
+    const expires = within(result).getByText("31 oktober 2026");
+    expect(expires.parentElement?.textContent).toBe(
+      "Förfaller 31 oktober 2026",
+    );
+    expect(expires.style.fontFamily).toBe("var(--obrf-font-data)");
     expect(within(result).queryByRole("button")).toBeNull();
     expect(screen.queryByRole("button", { name: /bekräfta/i })).toBeNull();
   });
@@ -338,8 +350,9 @@ describe("meeting support's view", () => {
     });
     release({ status: 201, body: AGENDA });
 
+    await screen.findByRole("link", { name: "Läs och bekräfta dagordningen" });
     expect(
-      await screen.findByText(
+      paragraph(
         "Förslag till dagordning för Extra föreningsstämma 10 februari 2027",
       ),
     ).toBeTruthy();
@@ -386,6 +399,169 @@ describe("meeting support's view", () => {
     });
 
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("drops a refusal that arrives after another meeting was chosen", async () => {
+    const { release } = serve(MEETINGS, "hold");
+    await show();
+
+    askAgenda();
+    fireEvent.change(within(agendaForm()).getByLabelText("Stämma"), {
+      target: { value: "meeting-2027" },
+    });
+    release({ status: 409, body: { reason: "notice-already-issued" } });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    // The answer is in, so another draft may be asked for.
+    expect(
+      (
+        within(agendaForm()).getByRole("button", {
+          name: "Föreslå dagordning",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
+  it("drops a refusal that arrives after the request was changed", async () => {
+    const { release } = serve(MEETINGS, "hold");
+    await show();
+
+    askAgenda("Ta upp frågan om laddstolpar.");
+    fireEvent.change(
+      within(agendaForm()).getByLabelText("Önskemål (frivilligt)"),
+      {
+        target: { value: "Ta upp frågan om cykelrum." },
+      },
+    );
+    release({ status: 409, body: { reason: "meeting-already-held" } });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a draft that arrives after another meeting was chosen, and names its meeting", async () => {
+    const { release } = serve(MEETINGS, "hold");
+    await show();
+
+    askAgenda();
+    fireEvent.change(
+      within(agendaForm()).getByLabelText("Önskemål (frivilligt)"),
+      {
+        target: { value: "Något annat." },
+      },
+    );
+    release({ status: 201, body: AGENDA });
+
+    expect(
+      (
+        await screen.findByRole("link", {
+          name: "Läs och bekräfta dagordningen",
+        })
+      ).getAttribute("href"),
+    ).toBe("/app/pending-changes/pending-1");
+  });
+
+  it("keeps an agenda request that got no answer, with its meeting, after another meeting was chosen", async () => {
+    const { release } = serve(MEETINGS, "hold");
+    await show();
+
+    askAgenda();
+    fireEvent.change(within(agendaForm()).getByLabelText("Stämma"), {
+      target: { value: "meeting-2027" },
+    });
+    release(500);
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /^Inget svar kom tillbaka/,
+    );
+    expect(
+      screen.getByText(/^Begäran om Extra föreningsstämma/).textContent,
+    ).toBe("Begäran om Extra föreningsstämma 10 februari 2027");
+    expect(
+      screen.getByRole("link", { name: "Öppna Väntande ändringar" }),
+    ).toBeTruthy();
+
+    // Changing the choice again does not hide that a proposal may exist.
+    fireEvent.change(within(agendaForm()).getByLabelText("Stämma"), {
+      target: { value: "meeting-extra" },
+    });
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
+  it("drops a refusal of minutes notes that were corrected before it arrived", async () => {
+    const { release } = serve(MEETINGS, "hold");
+    await show();
+
+    askMinutes("Anteckningar med 19121212-1212.");
+    fireEvent.change(
+      within(minutesForm()).getByLabelText("Dina anteckningar"),
+      {
+        target: { value: "Anteckningar utan personnummer." },
+      },
+    );
+    release({ status: 422, body: { reason: "personal-identity-number" } });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (
+        within(minutesForm()).getByRole("button", {
+          name: "Skriv utkast till protokoll",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
+  it("drops a refusal of minutes that arrives after another meeting was chosen", async () => {
+    const { release } = serve(MEETINGS, "hold");
+    await show();
+
+    askMinutes("Ordföranden öppnade stämman.");
+    fireEvent.change(within(minutesForm()).getByLabelText("Stämma"), {
+      target: { value: "meeting-2027" },
+    });
+    release({ status: 422, body: { reason: "personal-identity-number" } });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("sets every date the view writes in the data face", async () => {
+    serve(MEETINGS, { status: 201, body: AGENDA }, MINUTES);
+    await show();
+
+    for (const form of [agendaForm(), minutesForm()]) {
+      expect(
+        (within(form).getByLabelText("Stämma") as HTMLElement).style.fontFamily,
+      ).toBe("var(--obrf-font-data)");
+    }
+
+    askAgenda();
+    await screen.findByRole("link", { name: "Läs och bekräfta dagordningen" });
+    const heading = paragraph(
+      "Förslag till dagordning för Extra föreningsstämma 10 februari 2027",
+    );
+    expect(within(heading).getByText("10 februari 2027").style.fontFamily).toBe(
+      "var(--obrf-font-data)",
+    );
+
+    askMinutes("Ordföranden öppnade stämman.");
+    await screen.findByLabelText(
+      "Utkast till protokoll för Ordinarie föreningsstämma 13 maj 2026",
+    );
+    // The options are text of their own: only the heading's day is an element.
+    expect(screen.getByText("13 maj 2026").style.fontFamily).toBe(
+      "var(--obrf-font-data)",
+    );
   });
 
   it("writes a minutes draft from the notes, to copy, and keeps it nowhere", async () => {
@@ -639,7 +815,7 @@ describe("meeting support's view", () => {
         }),
       ).toBeTruthy();
       expect(
-        screen.getByText(
+        paragraph(
           "Agenda draft for Extraordinary general meeting February 10, 2027",
         ),
       ).toBeTruthy();

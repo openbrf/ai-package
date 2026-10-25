@@ -328,6 +328,8 @@ assistant (`/app/plugin/ai-package`).
   rejects it. The view has no confirm button. When no answer came back, the
   view says the draft may have been proposed all the same and links the
   pending changes screen, so the board member looks there before asking again.
+  That notice names the meeting the request was for, and stays when another
+  meeting is chosen, as a proposal may exist for the first.
 - **A minutes draft** is offered for any listed meeting, the latest one held
   first. The board member pastes their notes and gets the draft as text to
   copy, with a sentence when it was cut short (`complete: false`). The view
@@ -336,7 +338,12 @@ assistant (`/app/plugin/ai-package`).
   while one is on its way. An answer is shown only if it belongs to the latest
   request of its kind, and with the meeting it was asked for, so an answer that
   arrives late never takes the place of a newer one. A refusal clears once the
-  board member chooses another meeting or changes what they wrote.
+  board member chooses another meeting or changes what they wrote, and one that
+  arrives after such a change is dropped, as it says nothing of the new
+  request. A draft that arrives after the change is shown all the same, with
+  the meeting it was written for.
+- A date is set in the data face (`--obrf-font-data`): the day in a meeting's
+  name, a pending change's expiry, and the meeting selectors.
 - Every refusal reason above has a sentence of its own in Swedish and English,
   and a refusal the view does not know is answered with a general one.
 

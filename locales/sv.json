@@ -96,6 +96,7 @@
       "confirmThere": "Dagordningen ändras inte förrän du har bekräftat förslaget under Väntande ändringar. Där kan du också avvisa det.",
       "open": "Läs och bekräfta dagordningen",
       "expires": "Förfaller {{date}}",
+      "askedFor": "Begäran om {{meeting}}",
       "pendingChanges": "Öppna Väntande ändringar"
     },
     "minutes": {

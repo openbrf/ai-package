@@ -96,6 +96,7 @@
       "confirmThere": "The agenda does not change until you have confirmed the draft under Pending changes. You can also reject it there.",
       "open": "Read and confirm the agenda",
       "expires": "Expires {{date}}",
+      "askedFor": "Request for {{meeting}}",
       "pendingChanges": "Open Pending changes"
     },
     "minutes": {
