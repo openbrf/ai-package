@@ -26,7 +26,24 @@ been released yet.
 - **The tarball** is attested by this repository's
   [release workflow](.github/workflows/release.yml), in a run on the release's
   tag. Check it with
-  `gh attestation verify <file>.tgz --repo openbrf/ai-package --source-ref refs/tags/v<version>`.
+  `gh attestation verify <file>.tgz --repo openbrf/ai-package --source-ref refs/tags/v<version>`,
+  then check that the commit it was attested from is on `main`. A tag of a
+  commit off `main` can carry a workflow of its own that attests and
+  publishes a tarball without the pin checks or the evaluation (see
+  "Releasing"), so the attestation alone does not prove that the workflow on
+  `main` made the tarball:
+
+  ```sh
+  commit=$(gh attestation verify <file>.tgz --repo openbrf/ai-package \
+    --source-ref refs/tags/v<version> --format json \
+    --jq '.[].verificationResult.signature.certificate.sourceRepositoryDigest')
+  gh api "repos/openbrf/ai-package/compare/main...$commit" --jq .status
+  ```
+
+  The second command has to print `identical` or `behind`. The catalog's
+  check of an attestation does not include this yet, so the reviewer of the
+  catalog pull request that lists a version runs it.
+
 - **The source** is named by the `source.json` packed in the tarball, a copy of
   this repository's `source.json` at the tagged commit. It is Apteo's
   statement of the commit the tarball was built from, kept in this
@@ -79,9 +96,13 @@ been released yet.
 
 GitHub runs the release workflow as it is at the tagged commit, so the
 workflow's own refusals below hold only for a commit of `main`: a tag of any
-other commit can carry a workflow without them, and such a run reaches the
-`release` environment's secrets once it is approved. The check in step 3 is
-what keeps it out.
+other commit can carry a workflow without them. The approvals in step 3 gate
+the `release` environment's secrets and nothing else. Their check keeps such
+a run away from the secrets, and so from the private source and the model
+provider key, but a workflow that uses no environment asks nobody for
+approval: it can attest a tarball of its own and publish it. The tag ruleset
+limits who can push such a tag, and the check under "What a release proves"
+is what tells such a release apart.
 
 The workflow refuses a tag that is not on `main`, whose `source.json` is not
 `main`'s, or that does not match the version, and a pin that names a
@@ -99,7 +120,7 @@ The run logs of this repository are public, so the output of the source's
 dependency install, typecheck, tests, evaluation and build stays out of them.
 A failed release says which step failed; running that step in a checkout of
 the pinned commit shows why. Of the pinned commit, only the workspace's root
-files, its workflows and the package's own directory pass from the fetch job
+files, its CI workflow and the package's own directory pass from the fetch job
 to the jobs that install the package's dependencies, so no other module's
 source reaches them. That source passes from one job to the next only
 encrypted, the run attests only the tarball its build job packed, and it
@@ -111,8 +132,9 @@ The workflow relies on these repository settings:
 - a tag ruleset lets only the maintainers create a `v*` tag, and nobody move or
   delete one;
 - a branch ruleset on `main` requires a pull request approved by someone other
-  than its author and the `Test the release workflow` check, and refuses force
-  pushes and deletion;
+  than its author and the `Test the release workflow` check, from the GitHub
+  Actions app so that no other check or status of that name stands in for it,
+  and refuses force pushes and deletion;
 - the `release` environment allows only `v*` tags, and a maintainer approves
   each run's jobs in it. It holds three secrets:
   - `SOURCE_DEPLOY_KEY`, a read-only deploy key on apteoab/openbrf-modules.

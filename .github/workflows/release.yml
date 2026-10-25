@@ -43,7 +43,7 @@
 #   apteoab/openbrf-modules that reads every module there, not only this
 #   package. It runs no Node and installs nothing. It checks the pin, takes
 #   from the pinned commit, without history, only the workspace's root files,
-#   the workflows and this package's directory, and seals them with
+#   its CI workflow and this package's directory, and seals them with
 #   `SOURCE_ARCHIVE_KEY`: an artifact of a public repository can be downloaded
 #   by anyone signed in to GitHub. The other modules' source never reaches a
 #   job that runs the source's dependencies.
@@ -63,10 +63,13 @@
 #
 # GitHub runs this file as it is at the pushed tag, so its checks below do not
 # bind whoever pushes a tag of a commit that is not on main: such a commit can
-# hold another release.yml. The tag ruleset limits who may push a tag, and the
-# maintainer who approves each job in the `release` environment is the gate
-# that holds: before each approval, they check that the run's commit is on
-# main (see "Releasing" in the README).
+# hold another release.yml. The tag ruleset limits who may push a tag. The
+# maintainer who approves each job in the `release` environment gates its
+# secrets and nothing else: before each approval, they check that the run's
+# commit is on main (see "Releasing" in the README). A release.yml that uses
+# no environment asks for no approval, and can still attest a tarball and
+# publish it. So whoever checks a release's attestation also checks that the
+# commit it was attested from is on main (see "What a release proves").
 #
 # The pin is only a commit id, and outside reviewers cannot read the commit it
 # names. So the run builds nothing that is not on the source's `main`, and it
@@ -189,9 +192,10 @@ jobs:
       # repository of its own, so `release:pack` can tell that it builds that
       # commit unchanged. And of that commit only what the package's install,
       # typecheck, tests, evaluation and build read: the workspace's root
-      # files, the repository's workflows, which the package's tests read,
-      # and the package's own directory. The jobs that unseal it run the source's dependencies, so a
-      # compromised one finds no other module's source there. The sparse
+      # files, its CI workflow, which the package's tests read, and the
+      # package's own directory. The jobs that unseal it run the source's
+      # dependencies, so a compromised one finds no other module's source,
+      # and no other module's workflow, there. The sparse
       # checkout and the blob filter fetch the blobs of those paths alone; the
       # commit's trees, which name the other modules' files, still come with
       # it.
@@ -211,7 +215,7 @@ jobs:
           git -C "$pinned" remote add origin "file://$GITHUB_WORKSPACE/source"
           git -C "$pinned" sparse-checkout set --no-cone \
             /.gitignore /.nvmrc /package.json /pnpm-lock.yaml /pnpm-workspace.yaml \
-            /.github/workflows/ /modules/ai-package/
+            /.github/workflows/ci.yml /modules/ai-package/
           git -C "$pinned" fetch --quiet --depth 1 --filter=blob:none origin "$COMMIT"
           git -C "$pinned" checkout --quiet --detach FETCH_HEAD
           # Without the remote, no later git command fetches what was left out.
@@ -321,8 +325,9 @@ jobs:
 
       # Builds from scratch with the pin copied in, packs, and runs the
       # package check over the very tarball handed on. Its digest goes to
-      # `publish`, which attests only that tarball: `eval` runs the source's
-      # dependencies beside this job, and could upload one of its own.
+      # `publish`, which attests only that tarball: `eval` has ended before
+      # this job starts, but a token it let out could put a tarball of its
+      # own in its place.
       - name: Pack
         id: pack
         working-directory: source/modules/ai-package
@@ -461,7 +466,7 @@ jobs:
             --draft \
             --verify-tag \
             --title "$TAG" \
-            --notes "Release $TAG of the AI package for Open BRF, built from apteoab/openbrf-modules at $COMMIT, the commit source.json pins, after its prompt-injection evaluation passed on that commit. Verify the tarball with: gh attestation verify $(basename "$FILE") --repo $GITHUB_REPOSITORY --source-ref refs/tags/$TAG"
+            --notes "Release $TAG of the AI package for Open BRF, built from apteoab/openbrf-modules at $COMMIT, the commit source.json pins, after its prompt-injection evaluation passed on that commit. Verify the tarball with: gh attestation verify $(basename "$FILE") --repo $GITHUB_REPOSITORY --source-ref refs/tags/$TAG, then check that the commit it was attested from is on main, as \"What a release proves\" in the README shows."
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
       # What a catalog entry for this release states.

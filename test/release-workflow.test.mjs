@@ -40,17 +40,19 @@ function* strings(value, path = []) {
  * The names of the secrets a value refers to, with the path to each. The word
  * counts anywhere in a string, not only where this test can tell an
  * expression apart: `${{ format('{0}', secrets.NAME) }}` has a `}` inside.
+ * GitHub reads context and secret names in any case, so `Secrets.name` is
+ * `secrets.NAME`.
  */
 function* secretReferences(value) {
   for (const [text, path] of strings(value)) {
-    for (const word of text.matchAll(/\bsecrets\b(\.\w+)?/g)) {
+    for (const word of text.matchAll(/\bsecrets\b(\.\w+)?/gi)) {
       // `secrets[...]` or `toJSON(secrets)` would hand on secrets this test
       // cannot name.
       assert.ok(
         word[1],
         `${path.join(".")} refers to secrets without naming one`,
       );
-      yield [word[1].slice(1), path];
+      yield [word[1].slice(1).toUpperCase(), path];
     }
   }
 }
@@ -63,6 +65,39 @@ const jobsReferring = (name) =>
 const runsNode = (step) =>
   /^(pnpm|actions)\/(action-setup|setup-node)@/.test(step.uses ?? "") ||
   /\b(pnpm|npm|npx|node|corepack|yarn)\b(?!-)/.test(step.run ?? "");
+
+describe("the secret-reach check", () => {
+  it("reads a secret's name in any case", () => {
+    assert.deepEqual(
+      [
+        ...secretReferences({
+          env: {
+            A: "${{ Secrets.SOURCE_DEPLOY_KEY }}",
+            B: "${{ format('{0}', SECRETS.anthropic_api_key) }}",
+          },
+        }),
+      ],
+      [
+        ["SOURCE_DEPLOY_KEY", ["env", "A"]],
+        ["ANTHROPIC_API_KEY", ["env", "B"]],
+      ],
+    );
+  });
+
+  it("refuses secrets it cannot name, in any case", () => {
+    for (const text of [
+      "${{ toJSON(SECRETS) }}",
+      "${{ toJSON(Secrets) }}",
+      "${{ secrets['SOURCE_DEPLOY_KEY'] }}",
+    ]) {
+      assert.throws(
+        () => [...secretReferences({ env: { A: text } })],
+        /refers to secrets without naming one/,
+        text,
+      );
+    }
+  });
+});
 
 describe("the release workflow", () => {
   it("starts on a version tag only", () => {
@@ -211,7 +246,7 @@ describe("the release workflow", () => {
     // The source's other modules stay out of the jobs that run the
     // dependencies of this one.
     assert.deepEqual(paths.trim().split(/\s+/).sort(), [
-      "/.github/workflows/",
+      "/.github/workflows/ci.yml",
       "/.gitignore",
       "/.nvmrc",
       "/modules/ai-package/",
@@ -302,6 +337,21 @@ describe("the release workflow", () => {
     );
     assert.ok(check >= 0, "job publish does not check the tarball's digest");
     assert.ok(check < attest, "job publish attests before checking");
+    // The file checked is the one attested and the one released.
+    const create = publish.steps.find((step) =>
+      /\bgh release create\b/.test(step.run ?? ""),
+    );
+    assert.equal(
+      publish.steps[attest].with["subject-path"],
+      publish.steps[check].env.FILE,
+      "job publish attests another file than it checks",
+    );
+    assert.equal(
+      create.env.FILE,
+      publish.steps[check].env.FILE,
+      "job publish releases another file than it checks",
+    );
+    assert.match(create.run, /^\s*gh release create "\$TAG" "\$FILE"/m);
     // A step that fails fails the job before it attests.
     for (const key of ["if", "continue-on-error"]) {
       assert.equal(publish.steps[check][key], undefined);
