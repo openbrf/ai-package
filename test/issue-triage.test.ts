@@ -16,6 +16,7 @@ import {
   type ModelUserMessage,
   totalTokens,
 } from "../src/provider.ts";
+import { unquotedData } from "../src/quoted-data.ts";
 import { UsageMeter } from "../src/usage.ts";
 import { INJECTIONS } from "./injection-issues.ts";
 import { ActionRefusalStandIn } from "./stand-in-archive.ts";
@@ -122,11 +123,11 @@ function prompt(provider: FakeProvider): string {
   return first.content as string;
 }
 
-/** The JSON inside one element of the prompt, parsed. */
+/** The value inside one element of the prompt, read back. */
 function element(text: string, name: string): unknown {
-  const start = text.indexOf(`<${name}>\n`) + name.length + 3;
-  const end = text.indexOf(`\n</${name}>`);
-  return JSON.parse(text.slice(start, end)) as unknown;
+  const start = text.indexOf(`<${name} note=`);
+  const end = text.indexOf(`\n</${name}>`) + name.length + 4;
+  return unquotedData(text.slice(start, end), name);
 }
 
 function resultsSent(provider: FakeProvider, index: number): ModelToolResult[] {

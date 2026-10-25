@@ -1,0 +1,67 @@
+name: Prompt-injection evaluation
+
+# The release gate: every case of eval/cases.ts against the real models, on
+# the secret ANTHROPIC_API_KEY of the environment injection-eval. A failed
+# case fails the run, and so does a missing key. See "The evaluation" in the
+# README, which lists the repository settings that guard the key.
+#
+# No push trigger: the release workflow calls this one, and a tag that also
+# started it would run the whole evaluation twice, at twice the spend, with
+# two results that may disagree.
+
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: Models to evaluate, comma-separated. Every model the board may choose when left empty.
+        required: false
+        default: ""
+        type: string
+      # At most ten, as eval/live-provider.ts enforces (MAX_EVAL_REPEAT).
+      repeat:
+        description: How many times each case runs.
+        required: false
+        default: "1"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+  # For the release workflow, whose publishing job is to need this one. It
+  # passes no secret: a job in an environment reads the environment's.
+  workflow_call:
+
+concurrency:
+  group: injection-eval-${{ github.ref }}
+  cancel-in-progress: false
+
+# Least privilege: checkout and dependency caching read the contents only.
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: Prompt-injection evaluation
+    runs-on: ubuntu-latest
+    # Holds the key. Its deployment rules decide which refs may read it.
+    environment: injection-eval
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The inputs reach the run through the environment, never the script.
+      - name: Evaluate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EVAL_MODELS: ${{ inputs.models }}
+          EVAL_REPEAT: ${{ inputs.repeat || '1' }}
+        run: pnpm eval

@@ -20,6 +20,7 @@ import {
   type ModelUserMessage,
   totalTokens,
 } from "../src/provider.ts";
+import { unquotedData } from "../src/quoted-data.ts";
 import {
   ActionRefusalStandIn,
   BYLAWS,
@@ -259,7 +260,7 @@ describe("an answer from the documents", () => {
       retry: "after-edit",
     });
     expect(minutes?.isError).toBeUndefined();
-    expect(JSON.parse(minutes?.content ?? "")).toMatchObject({
+    expect(unquotedData(minutes?.content ?? "", "document_get")).toMatchObject({
       id: MINUTES.id,
       pages: [{ number: 1, text: MINUTES.pages[0] }],
     });
@@ -376,7 +377,9 @@ describe("a source read in the same turn as the answer", () => {
         '"doc-bylaws" is not a document this conversation read with document_get.',
       );
       const delivered = results.find((each) => each.toolUseId === get.id);
-      expect(JSON.parse(delivered?.content ?? "")).toMatchObject({
+      expect(
+        unquotedData(delivered?.content ?? "", "document_get"),
+      ).toMatchObject({
         id: BYLAWS.id,
         pages: expect.arrayContaining([{ number: 2, text: BYLAWS.pages[1] }]),
       });
@@ -901,8 +904,13 @@ describe("what one question may spend", () => {
 
     const answer = await assistant.ask(REQUEST, QUESTION);
 
-    const sent = Array.from({ length: 6 }, (_, call) =>
-      JSON.parse(resultsSent(provider, call + 1)[0]?.content ?? "{}"),
+    const sent = Array.from(
+      { length: 6 },
+      (_, call) =>
+        unquotedData(
+          resultsSent(provider, call + 1)[0]?.content ?? "",
+          "document_get",
+        ) as { pages: { text: string }[] },
     );
     const characters = sent
       .flatMap((output) => output.pages as { text: string }[])
@@ -956,7 +964,7 @@ describe("what one question may spend", () => {
     await assistant.ask(REQUEST, QUESTION);
 
     expect(
-      JSON.parse(resultsSent(provider, 6)[0]?.content ?? ""),
+      unquotedData(resultsSent(provider, 6)[0]?.content ?? "", "document_get"),
     ).toMatchObject({
       pages: [{ number: 16, text: "x" }],
       truncated: true,
