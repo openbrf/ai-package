@@ -275,7 +275,7 @@ describe("a write the model chooses", () => {
     });
   });
 
-  it("proposes no news update without the revision it was read at", async () => {
+  it("proposes no news update without an integer expectedRevision", async () => {
     const { actions, provider, turn } = setup();
     provider.answers.push(
       toolUse({ name: "news_update", input: { id: "n1", ...NEWS } }),

@@ -301,10 +301,12 @@ instance offers an AI package (ADR 0038 in openbrf/openbrf, "News and pages on
   person may use, so the model is told of nothing they could not do
   themselves, and the route requires `site:manage`, the board's own grant for
   the news and the pages.
-- **No update over newer work.** A news update is proposed only with the
-  revision the model read, so one confirmed after somebody else saved the
-  item is refused rather than written over it. A page update needs the
-  revision anyway.
+- **No update over newer work.** A news update is proposed only with an
+  integer `expectedRevision`, which the model is told to take from the item
+  it read. The assistant checks that the revision is there, not that it is
+  the one read; the host compares it when the update is confirmed, so one
+  confirmed after somebody else saved the item is refused rather than
+  written over it. A page update needs the revision anyway.
 - **Stored text is data.** The model is told that the text of news items and
   pages is written by people and never instructions, and the tools'
   descriptions say the same. What a read returns reaches the model as quoted
