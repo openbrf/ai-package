@@ -9,6 +9,9 @@ import { parse } from "yaml";
  * can read every secret the job references, and the source's install, tests,
  * evaluation and build run third-party code, so each secret is kept to the
  * jobs that need it and out of the jobs that run that code where it can be.
+ * An artifact of a public repository can be downloaded by anyone signed in,
+ * so nothing unsealed is uploaded before the evaluation, the release gate,
+ * has passed.
  */
 const workflows = new URL("../.github/workflows/", import.meta.url);
 const read = async (name) =>
@@ -83,6 +86,74 @@ describe("the release workflow", () => {
         );
       }
     }
+  });
+
+  it("holds each secret in the jobs listed for it and no others", () => {
+    const holders = {};
+    for (const [name, job] of jobs) {
+      for (const secret of secretsOf(job)) {
+        (holders[secret] ??= []).push(name);
+      }
+    }
+    for (const names of Object.values(holders)) {
+      names.sort();
+    }
+    assert.deepEqual(holders, {
+      ANTHROPIC_API_KEY: ["eval"],
+      SOURCE_ARCHIVE_KEY: ["build", "eval", "fetch"],
+      SOURCE_DEPLOY_KEY: ["fetch"],
+    });
+  });
+
+  it("makes nothing unsealed downloadable before the evaluation passes", () => {
+    const [[evaluation, evaluator]] = jobsReferring("ANTHROPIC_API_KEY");
+    const gate = evaluator.steps.find((step) =>
+      secretsOf(step).has("ANTHROPIC_API_KEY"),
+    );
+    // A failed evaluation has to fail its job, and the job the run.
+    for (const [where, value] of [
+      [`job ${evaluation}`, evaluator],
+      [`the evaluation step of job ${evaluation}`, gate],
+    ]) {
+      assert.equal(value.if, undefined, `${where} may be skipped`);
+      assert.equal(
+        value["continue-on-error"],
+        undefined,
+        `${where} may fail without failing the run`,
+      );
+    }
+    for (const [name, job] of jobs) {
+      const uploadsUnsealed = job.steps.some(
+        (step) =>
+          /^actions\/upload-artifact@/.test(step.uses ?? "") &&
+          !/\.enc$/.test(step.with?.path ?? ""),
+      );
+      const publishes = ["id-token", "attestations", "contents"].some(
+        (permission) => job.permissions?.[permission] === "write",
+      );
+      if (uploadsUnsealed || publishes) {
+        assert.ok(
+          [job.needs].flat().includes(evaluation),
+          `job ${name} does not wait for the evaluation`,
+        );
+        // `always()`, `failure()` or `!cancelled()` would run it after a
+        // failed evaluation.
+        assert.equal(
+          job.if,
+          undefined,
+          `job ${name} has a condition of its own`,
+        );
+      }
+    }
+    assert.deepEqual([release.jobs.build.needs].flat().sort(), [
+      "eval",
+      "fetch",
+    ]);
+    assert.deepEqual([release.jobs.publish.needs].flat().sort(), [
+      "build",
+      "eval",
+      "fetch",
+    ]);
   });
 
   it("fetches the source in a job that runs no Node and seals what it hands on", () => {
@@ -176,6 +247,15 @@ describe("the release workflow", () => {
       job.if,
       "always()",
       `job ${name} skips its cleanup when the run fails`,
+    );
+    // Run before a job ends, it would miss what that job uploads.
+    assert.deepEqual(
+      [job.needs].flat().sort(),
+      jobs
+        .map(([other]) => other)
+        .filter((other) => other !== name)
+        .sort(),
+      `job ${name} does not wait for every other job`,
     );
     assert.deepEqual([...secretsOf(job)], []);
     assert.ok(

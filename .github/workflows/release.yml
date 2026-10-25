@@ -27,8 +27,8 @@
 # The package's prompt-injection evaluation is the release gate: it runs the
 # package's corpus of injections against every model the board may choose,
 # on the pinned commit. A case that fails fails its job, so nothing is
-# attested or published. The evaluation is in the source, so it runs here, as
-# a job, and not as a workflow of its own that this one calls.
+# packed, attested or published. The evaluation is in the source, so it runs
+# here, as a job, and not as a workflow of its own that this one calls.
 #
 # The run takes three secrets of the `release` environment, which allows only
 # `v*` tags and waits for a maintainer's approval before each job that uses
@@ -42,12 +42,13 @@
 #   pinned commit alone, without history, and seals it with
 #   `SOURCE_ARCHIVE_KEY`: an artifact of a public repository can be downloaded
 #   by anyone signed in to GitHub.
-# - `build` and `eval` hold `SOURCE_ARCHIVE_KEY` to unseal that commit. Only
+# - `eval` and `build` hold `SOURCE_ARCHIVE_KEY` to unseal that commit. Only
 #   `eval` holds `ANTHROPIC_API_KEY`, a key of its own in an Anthropic
 #   workspace of its own with a spend limit, and only its evaluation step is
 #   handed it. `eval` installs without the dependencies' install scripts.
-#   Both keys are rotated whenever a dependency of the source is reported
-#   compromised.
+#   `build` starts only once the evaluation has passed, because the tarball it
+#   uploads is not sealed. Both keys are rotated whenever a dependency of the
+#   source is reported compromised.
 # - `publish` attests and publishes, with `id-token` and `attestations` and no
 #   secret. `cleanup` deletes the run's artifacts once it ends, however it
 #   ends.
@@ -194,9 +195,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # After the evaluation, not beside it: the tarball is an artifact of a
+  # public repository once uploaded, and deleting it later does not take back
+  # a copy already downloaded, so no tarball exists until the evaluation has
+  # passed.
   build:
     name: Test and pack the pinned source
-    needs: fetch
+    needs: [fetch, eval]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: release
@@ -407,9 +412,7 @@ jobs:
             echo "- bytes: \`$(stat -c %s "$FILE")\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Sealed or not, nothing of a run stays downloadable longer than the run:
-  # the tarball of a release that failed its evaluation is not to be had
-  # either.
+  # Nothing of a run stays downloadable longer than the run, sealed or not.
   cleanup:
     name: Delete the run's artifacts
     needs: [fetch, build, eval, publish]

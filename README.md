@@ -55,23 +55,27 @@ been released yet.
 2. Merge it, then push the tag `v<version>` from `main` while `source.json`
    there still pins that commit. The version is the one the pinned commit's
    package states.
-3. Approve the run in the `release` environment twice: before it fetches the
-   source, and again before it builds and evaluates it.
+3. Approve the run in the `release` environment three times: before it
+   fetches the source, before it evaluates it, and before it builds it once
+   the evaluation has passed.
 
 The workflow refuses a tag that is not on `main`, whose `source.json` is not
 `main`'s, or that does not match the version, and a pin that is not on the
 main branch of apteoab/openbrf-modules. It fetches the pinned commit in a job
-that runs none of the source's code, then runs the package's typecheck and
-tests and its prompt-injection evaluation in jobs of their own, packs it with
-the pin copied in unchanged, attests the tarball and publishes the release. Its
-job summary gives the sha512 and size for the catalog entry. Every release pays
-for one run of the evaluation, on the model provider key below.
+that runs none of the source's code, then runs the package's prompt-injection
+evaluation in a job of its own. Only once that has passed does it run the
+package's typecheck and tests in another job and pack it with the pin copied
+in unchanged, so no tarball is made of a commit that failed the evaluation.
+Then it attests the tarball and publishes the release. Its job summary gives
+the sha512 and size for the catalog entry. Every release pays for one run of
+the evaluation, on the model provider key below.
 
 The run logs of this repository are public, so the output of the source's
 dependency install, typecheck, tests, evaluation and build stays out of them.
 A failed release says which step failed; running that step in a checkout of
 the pinned commit shows why. The source passes from one job to the next only
-encrypted, and the run deletes its artifacts when it ends.
+encrypted, and the run deletes its artifacts, the tarball among them, when it
+ends.
 
 The workflow relies on these repository settings:
 
