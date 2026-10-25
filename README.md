@@ -83,10 +83,19 @@ been released yet.
 
    It prints `identical` for the head of `main` and `behind` for an earlier
    commit of `main`; approve nothing else. For a `behind` commit, approve only
-   if `main` has changed neither the release workflow nor `source.json` since,
-   that is, if
-   `gh api repos/openbrf/ai-package/compare/<commit>...main --jq '.files[].filename'`
-   lists neither `.github/workflows/release.yml` nor `source.json`.
+   if `main` has changed neither the release workflow nor `source.json` since.
+   Compare the two files' blob ids, not the compare API's list of changed
+   files, which stops at 300 files:
+
+   ```sh
+   for f in .github/workflows/release.yml source.json; do
+     a=$(gh api "repos/openbrf/ai-package/contents/$f?ref=<commit>" --jq .sha) &&
+       b=$(gh api "repos/openbrf/ai-package/contents/$f?ref=main" --jq .sha) &&
+       [ "$a" = "$b" ] && echo "$f: same" || echo "$f: DIFFERENT, approve nothing"
+   done
+   ```
+
+   Approve only if both lines read `same`.
 
 4. Once the run has ended, however it ended, replace `SOURCE_ARCHIVE_KEY`:
 
