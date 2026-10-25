@@ -1,6 +1,0 @@
-# Dependency build scripts must be approved explicitly (pnpm >= 10). esbuild's
-# checks that the binary for this platform was installed.
-allowBuilds:
-  esbuild: true
-minimumReleaseAgeExclude:
-  - "@anthropic-ai/sdk@1.1.0"
