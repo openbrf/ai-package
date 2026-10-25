@@ -11,7 +11,9 @@ import { parse } from "yaml";
  * jobs that need it and out of the jobs that run that code where it can be.
  * An artifact of a public repository can be downloaded by anyone signed in,
  * so nothing unsealed is uploaded before the evaluation, the release gate,
- * has passed.
+ * has passed. Only the package's own files of the private source reach the
+ * jobs that run its dependencies, and the tarball attested is the one the
+ * build job packed.
  */
 const workflows = new URL("../.github/workflows/", import.meta.url);
 const read = async (name) =>
@@ -30,19 +32,21 @@ function* strings(value, path = []) {
   }
 }
 
-/** The names of the secrets a value refers to, with the path to each. */
+/**
+ * The names of the secrets a value refers to, with the path to each. The word
+ * counts anywhere in a string, not only where this test can tell an
+ * expression apart: `${{ format('{0}', secrets.NAME) }}` has a `}` inside.
+ */
 function* secretReferences(value) {
   for (const [text, path] of strings(value)) {
-    for (const [expression] of text.matchAll(/\$\{\{[^}]*\}\}/g)) {
-      for (const word of expression.matchAll(/\bsecrets\b(\.\w+)?/g)) {
-        // `secrets[...]` or `toJSON(secrets)` would hand on secrets this test
-        // cannot name.
-        assert.ok(
-          word[1],
-          `${path.join(".")} refers to secrets without naming one`,
-        );
-        yield [word[1].slice(1), path];
-      }
+    for (const word of text.matchAll(/\bsecrets\b(\.\w+)?/g)) {
+      // `secrets[...]` or `toJSON(secrets)` would hand on secrets this test
+      // cannot name.
+      assert.ok(
+        word[1],
+        `${path.join(".")} refers to secrets without naming one`,
+      );
+      yield [word[1].slice(1), path];
     }
   }
 }
@@ -51,9 +55,10 @@ const secretsOf = (job) =>
   new Set([...secretReferences(job)].map(([name]) => name));
 const jobsReferring = (name) =>
   jobs.filter(([, job]) => secretsOf(job).has(name));
+// Not a file name such as `pnpm-lock.yaml`.
 const runsNode = (step) =>
   /^(pnpm|actions)\/(action-setup|setup-node)@/.test(step.uses ?? "") ||
-  /\b(pnpm|npm|npx|node|corepack|yarn)\b/.test(step.run ?? "");
+  /\b(pnpm|npm|npx|node|corepack|yarn)\b(?!-)/.test(step.run ?? "");
 
 describe("the release workflow", () => {
   it("starts on a version tag only", () => {
@@ -161,6 +166,14 @@ describe("the release workflow", () => {
     assert.equal(holders.length, 1, "exactly one job holds the deploy key");
     const [[name, job]] = holders;
     for (const step of job.steps) {
+      // Only the actions listed here, so a new one is a decision to make.
+      if (step.uses !== undefined) {
+        assert.match(
+          step.uses,
+          /^actions\/(checkout|upload-artifact)@/,
+          `job ${name} holds the deploy key and runs ${step.uses}`,
+        );
+      }
       assert.ok(
         !runsNode(step),
         `job ${name} holds the deploy key and runs Node in ${step.name ?? step.uses}`,
@@ -179,6 +192,55 @@ describe("the release workflow", () => {
     assert.equal(steps.length, 1);
     assert.match(steps[0].uses, /^actions\/checkout@/);
     assert.equal(steps[0].with["persist-credentials"], false);
+  });
+
+  it("hands on only the package's files and installs its dependencies alone", () => {
+    const [[name, job]] = jobsReferring("SOURCE_DEPLOY_KEY");
+    const seal = job.steps.find((step) =>
+      /\bopenssl enc\b/.test(step.run ?? ""),
+    );
+    assert.ok(seal, `job ${name} seals nothing`);
+    const script = seal.run.replace(/\\\n/g, " ");
+    const [, paths] =
+      script.match(/\bsparse-checkout set --no-cone ([^\n]*)/) ?? [];
+    assert.ok(paths, `job ${name} seals the whole commit`);
+    // The source's other modules stay out of the jobs that run the
+    // dependencies of this one.
+    assert.deepEqual(paths.trim().split(/\s+/).sort(), [
+      "/.github/workflows/",
+      "/.gitignore",
+      "/.nvmrc",
+      "/modules/ai-package/",
+      "/package.json",
+      "/pnpm-lock.yaml",
+      "/pnpm-workspace.yaml",
+    ]);
+    const order = [
+      /\bsparse-checkout set\b/,
+      /\bfetch\b[^\n]*--filter=blob:none\b/,
+      /\bcheckout\b[^\n]*FETCH_HEAD\b/,
+      /\bcat-file --batch-all-objects\b/,
+      /\bopenssl enc\b/,
+    ].map((pattern) => script.search(pattern));
+    assert.ok(
+      order.every(
+        (at, index) => at >= 0 && (index === 0 || at > order[index - 1]),
+      ),
+      `job ${name} does not fetch the package's blobs alone and check that before sealing`,
+    );
+    for (const [other, { steps }] of jobs) {
+      for (const step of steps) {
+        for (const [, args] of (step.run ?? "").matchAll(
+          /\bpnpm (?:install|i|add)\b([^\n;&|>]*)/g,
+        )) {
+          assert.match(
+            args,
+            /(^|\s)--filter \.\/modules\/ai-package\.\.\.(\s|$)/,
+            `job ${other} installs more than the package's dependencies`,
+          );
+        }
+      }
+    }
   });
 
   it("hands the model provider key to the evaluation's step alone", () => {
@@ -215,6 +277,49 @@ describe("the release workflow", () => {
         );
       }
     }
+  });
+
+  it("attests only the tarball the build job packed", () => {
+    const { build, publish } = release.jobs;
+    assert.equal(
+      build.outputs.digest,
+      "${{ steps.pack.outputs.digest }}",
+      "job build hands on no digest of its tarball",
+    );
+    const pack = build.steps.find((step) => step.id === "pack");
+    assert.match(pack.run, /\bdigest=\$\(sha256sum\b/);
+    const attest = publish.steps.findIndex((step) =>
+      /^actions\/attest-build-provenance@/.test(step.uses ?? ""),
+    );
+    const check = publish.steps.findIndex(
+      (step) =>
+        step.env?.DIGEST === "${{ needs.build.outputs.digest }}" &&
+        /\bsha256sum\b/.test(step.run ?? ""),
+    );
+    assert.ok(check >= 0, "job publish does not check the tarball's digest");
+    assert.ok(check < attest, "job publish attests before checking");
+    // A step that fails fails the job before it attests.
+    for (const key of ["if", "continue-on-error"]) {
+      assert.equal(publish.steps[check][key], undefined);
+    }
+  });
+
+  it("fetches from the repository source.json names, and only that one", async () => {
+    const pin = JSON.parse(
+      await readFile(new URL("../source.json", import.meta.url), "utf8"),
+    );
+    const [readPin] = release.jobs.fetch.steps.filter(
+      (step) => step.id === "pin",
+    );
+    assert.equal(readPin.env.SOURCE_REPOSITORY, pin.repository);
+    assert.match(readPin.run, /\.repository\b[^\n]*\$SOURCE_REPOSITORY/);
+    const sources = release.jobs.fetch.steps.filter(
+      (step) => step.with?.repository !== undefined,
+    );
+    assert.deepEqual(
+      sources.map((step) => `https://github.com/${step.with.repository}`),
+      [pin.repository],
+    );
   });
 
   it("attests and publishes in a job that holds no secret", () => {

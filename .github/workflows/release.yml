@@ -9,6 +9,9 @@
 #     "commit": "<full commit id>"
 #   }
 #
+# The run refuses a pin that names another repository: it fetches from
+# apteoab/openbrf-modules alone.
+#
 # To release: move `source.json` to the commit to release in a pull request,
 # merge it, then push the tag from main while main still pins that commit:
 #
@@ -38,20 +41,32 @@
 #
 # - `fetch` holds `SOURCE_DEPLOY_KEY`, a read-only deploy key on
 #   apteoab/openbrf-modules that reads every module there, not only this
-#   package. It runs no Node and installs nothing. It checks the pin, takes the
-#   pinned commit alone, without history, and seals it with
+#   package. It runs no Node and installs nothing. It checks the pin, takes
+#   from the pinned commit, without history, only the workspace's root files,
+#   the workflows and this package's directory, and seals them with
 #   `SOURCE_ARCHIVE_KEY`: an artifact of a public repository can be downloaded
-#   by anyone signed in to GitHub.
-# - `eval` and `build` hold `SOURCE_ARCHIVE_KEY` to unseal that commit. Only
-#   `eval` holds `ANTHROPIC_API_KEY`, a key of its own in an Anthropic
-#   workspace of its own with a spend limit, and only its evaluation step is
-#   handed it. `eval` installs without the dependencies' install scripts.
-#   `build` starts only once the evaluation has passed, because the tarball it
-#   uploads is not sealed. Both keys are rotated whenever a dependency of the
+#   by anyone signed in to GitHub. The other modules' source never reaches a
+#   job that runs the source's dependencies.
+# - `eval` and `build` hold `SOURCE_ARCHIVE_KEY` to unseal it, and install
+#   this package's dependencies alone. Only `eval` holds `ANTHROPIC_API_KEY`,
+#   a key of its own in an Anthropic workspace of its own with a spend limit,
+#   and only its evaluation step is handed it. `eval` installs without the
+#   dependencies' install scripts. `build` starts only once the evaluation has
+#   passed, because the tarball it uploads is not sealed. `SOURCE_ARCHIVE_KEY`
+#   is replaced after every run, so a key read in one run opens no later
+#   run's source. `ANTHROPIC_API_KEY` is rotated whenever a dependency of the
 #   source is reported compromised.
-# - `publish` attests and publishes, with `id-token` and `attestations` and no
-#   secret. `cleanup` deletes the run's artifacts once it ends, however it
-#   ends.
+# - `publish` checks that the tarball it downloaded is the one `build`
+#   uploaded, then attests and publishes, with `id-token` and `attestations`
+#   and no secret. `cleanup` deletes the run's artifacts once it ends, however
+#   it ends.
+#
+# GitHub runs this file as it is at the pushed tag, so its checks below do not
+# bind whoever pushes a tag of a commit that is not on main: such a commit can
+# hold another release.yml. The tag ruleset limits who may push a tag, and the
+# maintainer who approves each job in the `release` environment is the gate
+# that holds: before each approval, they check that the run's commit is on
+# main (see "Releasing" in the README).
 #
 # The pin is only a commit id, and outside reviewers cannot read the commit it
 # names. So the run builds nothing that is not on the source's `main`, and it
@@ -109,12 +124,14 @@ jobs:
       # A tag is cheap to push from anywhere, so the run refuses one that is
       # not on main, or whose pin is no longer main's. The pin's form is
       # checked again, with the catalog's rules, by the source's own
-      # `release:pack`; this reads only the commit to fetch.
+      # `release:pack`; this reads only the repository, which has to be the
+      # one fetched below, and the commit to fetch.
       - name: Read the pin
         id: pin
         working-directory: release
         env:
           TAG: ${{ github.ref_name }}
+          SOURCE_REPOSITORY: https://github.com/apteoab/openbrf-modules
         run: |
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "::error::$TAG is not on main. Merge the release first, then tag the merged commit."
@@ -126,6 +143,10 @@ jobs:
           fi
           if ! git show origin/main:source.json | cmp -s - source.json; then
             echo "::error::source.json at $TAG is not the one on main. Tag a commit of main whose source.json is main's."
+            exit 1
+          fi
+          if [ "$(jq -r '.repository' source.json)" != "$SOURCE_REPOSITORY" ]; then
+            echo "::error::source.json does not name $SOURCE_REPOSITORY, the only repository this workflow fetches from."
             exit 1
           fi
           commit=$(jq -er '.commit' source.json)
@@ -166,7 +187,14 @@ jobs:
 
       # The pinned commit alone, without the history before it, in a
       # repository of its own, so `release:pack` can tell that it builds that
-      # commit unchanged.
+      # commit unchanged. And of that commit only what the package's install,
+      # typecheck, tests, evaluation and build read: the workspace's root
+      # files, the repository's workflows, which the package's tests read,
+      # and the package's own directory. The jobs that unseal it run the source's dependencies, so a
+      # compromised one finds no other module's source there. The sparse
+      # checkout and the blob filter fetch the blobs of those paths alone; the
+      # commit's trees, which name the other modules' files, still come with
+      # it.
       - name: Seal the pinned commit
         id: seal
         env:
@@ -177,10 +205,28 @@ jobs:
             echo "::error::The release environment holds no SOURCE_ARCHIVE_KEY."
             exit 1
           fi
+          git -C "$GITHUB_WORKSPACE/source" config uploadpack.allowFilter true
           pinned="$RUNNER_TEMP/pinned"
           git init --quiet "$pinned"
-          git -C "$pinned" fetch --quiet --depth 1 "$GITHUB_WORKSPACE/source" "$COMMIT"
+          git -C "$pinned" remote add origin "file://$GITHUB_WORKSPACE/source"
+          git -C "$pinned" sparse-checkout set --no-cone \
+            /.gitignore /.nvmrc /package.json /pnpm-lock.yaml /pnpm-workspace.yaml \
+            /.github/workflows/ /modules/ai-package/
+          git -C "$pinned" fetch --quiet --depth 1 --filter=blob:none origin "$COMMIT"
           git -C "$pinned" checkout --quiet --detach FETCH_HEAD
+          # Without the remote, no later git command fetches what was left out.
+          git -C "$pinned" remote remove origin
+          # A remote that does not filter only warns and sends every blob, so
+          # the run refuses a repository that holds the content of any file
+          # it did not check out.
+          git -C "$pinned" ls-files --stage -t |
+            awk '$1 == "H" { print $3 }' | sort -u > "$RUNNER_TEMP/kept"
+          git -C "$pinned" cat-file --batch-all-objects --batch-check='%(objecttype) %(objectname)' |
+            awk '$1 == "blob" { print $2 }' | sort -u > "$RUNNER_TEMP/held"
+          if [ -n "$(comm -13 "$RUNNER_TEMP/kept" "$RUNNER_TEMP/held")" ]; then
+            echo "::error::The pinned commit was fetched with files beyond the package's own, so nothing is sealed."
+            exit 1
+          fi
           mkdir "$RUNNER_TEMP/sealed"
           sealed="$RUNNER_TEMP/sealed/source.tgz.enc"
           tar -C "$pinned" -czf - . |
@@ -209,6 +255,7 @@ jobs:
       contents: read
     outputs:
       file: ${{ steps.pack.outputs.file }}
+      digest: ${{ steps.pack.outputs.digest }}
       artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
       # For the pin `release:pack` copies into the package.
@@ -254,11 +301,13 @@ jobs:
         with:
           node-version-file: source/.nvmrc
 
+      # The package's dependencies alone: the sealed source holds no other
+      # module.
       - name: Install dependencies
         working-directory: source
         run: |
-          if ! pnpm install --frozen-lockfile > "$RUNNER_TEMP/install.log" 2>&1; then
-            echo "::error::Installing the dependencies failed. Their output is kept out of this public log: run pnpm install --frozen-lockfile in a checkout of the pinned commit to see why."
+          if ! pnpm install --frozen-lockfile --filter ./modules/ai-package... > "$RUNNER_TEMP/install.log" 2>&1; then
+            echo "::error::Installing the dependencies failed. Their output is kept out of this public log: run pnpm install --frozen-lockfile --filter ./modules/ai-package... in a checkout of the pinned commit to see why."
             exit 1
           fi
 
@@ -271,7 +320,9 @@ jobs:
           fi
 
       # Builds from scratch with the pin copied in, packs, and runs the
-      # package check over the very tarball handed on.
+      # package check over the very tarball handed on. Its digest goes to
+      # `publish`, which attests only that tarball: `eval` runs the source's
+      # dependencies beside this job, and could upload one of its own.
       - name: Pack
         id: pack
         working-directory: source/modules/ai-package
@@ -282,6 +333,7 @@ jobs:
           fi
           file=$(cd "$RUNNER_TEMP/release" && ls -- *.tgz)
           echo "file=$file" >> "$GITHUB_OUTPUT"
+          echo "digest=$(sha256sum "$RUNNER_TEMP/release/$file" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         id: upload
@@ -335,14 +387,14 @@ jobs:
         with:
           node-version-file: source/.nvmrc
 
-      # Without the dependencies' install scripts: the evaluation builds
-      # nothing, and no script runs in the job that holds the model provider
-      # key before the evaluation itself.
+      # The package's dependencies alone, without their install scripts: the
+      # evaluation builds nothing, and no script runs in the job that holds
+      # the model provider key before the evaluation itself.
       - name: Install dependencies
         working-directory: source
         run: |
-          if ! pnpm install --frozen-lockfile --ignore-scripts > "$RUNNER_TEMP/install.log" 2>&1; then
-            echo "::error::Installing the dependencies failed. Their output is kept out of this public log: run pnpm install --frozen-lockfile --ignore-scripts in a checkout of the pinned commit to see why."
+          if ! pnpm install --frozen-lockfile --ignore-scripts --filter ./modules/ai-package... > "$RUNNER_TEMP/install.log" 2>&1; then
+            echo "::error::Installing the dependencies failed. Their output is kept out of this public log: run pnpm install --frozen-lockfile --ignore-scripts --filter ./modules/ai-package... in a checkout of the pinned commit to see why."
             exit 1
           fi
 
@@ -377,6 +429,18 @@ jobs:
         with:
           name: tarball
           path: ${{ runner.temp }}/release
+
+      # Before anything is attested: an artifact of this run can be replaced
+      # by a job that runs the source's dependencies.
+      - name: Check the tarball
+        env:
+          FILE: ${{ runner.temp }}/release/${{ needs.build.outputs.file }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          if [ -z "$DIGEST" ] || [ "$(sha256sum "$FILE" | cut -d ' ' -f 1)" != "$DIGEST" ]; then
+            echo "::error::The tarball is not the one the build job packed, so nothing is attested or released."
+            exit 1
+          fi
 
       - name: Attest the tarball
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

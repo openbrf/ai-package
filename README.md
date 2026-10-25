@@ -57,25 +57,53 @@ been released yet.
    package states.
 3. Approve the run in the `release` environment three times: before it
    fetches the source, before it evaluates it, and before it builds it once
-   the evaluation has passed.
+   the evaluation has passed. Before each approval, check that the run's
+   commit, shown on the run's page, is on `main`:
+
+   ```sh
+   gh api repos/openbrf/ai-package/compare/main...<commit> --jq .status
+   ```
+
+   It prints `identical` for the head of `main` and `behind` for an earlier
+   commit of `main`; approve nothing else. For a `behind` commit, approve only
+   if `main` has changed neither the release workflow nor `source.json` since,
+   that is, if
+   `gh api repos/openbrf/ai-package/compare/<commit>...main --jq '.files[].filename'`
+   lists neither `.github/workflows/release.yml` nor `source.json`.
+
+4. Once the run has ended, however it ended, replace `SOURCE_ARCHIVE_KEY`:
+
+   ```sh
+   openssl rand -base64 48 | gh secret set SOURCE_ARCHIVE_KEY --env release --repo openbrf/ai-package
+   ```
+
+GitHub runs the release workflow as it is at the tagged commit, so the
+workflow's own refusals below hold only for a commit of `main`: a tag of any
+other commit can carry a workflow without them, and such a run reaches the
+`release` environment's secrets once it is approved. The check in step 3 is
+what keeps it out.
 
 The workflow refuses a tag that is not on `main`, whose `source.json` is not
-`main`'s, or that does not match the version, and a pin that is not on the
-main branch of apteoab/openbrf-modules. It fetches the pinned commit in a job
-that runs none of the source's code, then runs the package's prompt-injection
-evaluation in a job of its own. Only once that has passed does it run the
-package's typecheck and tests in another job and pack it with the pin copied
-in unchanged, so no tarball is made of a commit that failed the evaluation.
-Then it attests the tarball and publishes the release. Its job summary gives
-the sha512 and size for the catalog entry. Every release pays for one run of
-the evaluation, on the model provider key below.
+`main`'s, or that does not match the version, and a pin that names a
+repository other than apteoab/openbrf-modules, the only one it fetches from,
+or a commit that is not on that repository's main branch. It fetches the
+pinned commit in a job that runs none of the source's code, then runs the
+package's prompt-injection evaluation in a job of its own. Only once that has
+passed does it run the package's typecheck and tests in another job and pack
+it with the pin copied in unchanged, so no tarball is made of a commit that
+failed the evaluation. Then it attests the tarball and publishes the release.
+Its job summary gives the sha512 and size for the catalog entry. Every release
+pays for one run of the evaluation, on the model provider key below.
 
 The run logs of this repository are public, so the output of the source's
 dependency install, typecheck, tests, evaluation and build stays out of them.
 A failed release says which step failed; running that step in a checkout of
-the pinned commit shows why. The source passes from one job to the next only
-encrypted, and the run deletes its artifacts, the tarball among them, when it
-ends.
+the pinned commit shows why. Of the pinned commit, only the workspace's root
+files, its workflows and the package's own directory pass from the fetch job
+to the jobs that install the package's dependencies, so no other module's
+source reaches them. That source passes from one job to the next only
+encrypted, the run attests only the tarball its build job packed, and it
+deletes its artifacts, the tarball among them, when it ends.
 
 The workflow relies on these repository settings:
 
@@ -83,13 +111,16 @@ The workflow relies on these repository settings:
 - a tag ruleset lets only the maintainers create a `v*` tag, and nobody move or
   delete one;
 - a branch ruleset on `main` requires a pull request approved by someone other
-  than its author, and refuses force pushes and deletion;
+  than its author and the `Test the release workflow` check, and refuses force
+  pushes and deletion;
 - the `release` environment allows only `v*` tags, and a maintainer approves
   each run's jobs in it. It holds three secrets:
   - `SOURCE_DEPLOY_KEY`, a read-only deploy key on apteoab/openbrf-modules.
     The key reads every module in that repository, not only this package;
-  - `SOURCE_ARCHIVE_KEY`, a random key that encrypts the source the run hands
-    from one job to the next;
+  - `SOURCE_ARCHIVE_KEY`, a key of at least 256 random bits, such as the 384
+    bits `openssl rand -base64 48` gives, that encrypts the source the run
+    hands from one job to the next. It is replaced after every run (step 4
+    above), so a key read in one run opens no later run's source;
   - `ANTHROPIC_API_KEY`, a key of its own for the evaluation, in an Anthropic
     workspace of its own with a spend limit;
 - the repository and its organisation hold no secret of these names outside
@@ -114,4 +145,5 @@ source and is not covered by it.
 
 Commit messages and pull request titles follow
 [Conventional Commits](https://www.conventionalcommits.org/). `pnpm test`
-checks which jobs of the release workflow can read each secret.
+checks which jobs of the release workflow can read each secret, and what
+passes from one job to the next.
