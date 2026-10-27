@@ -267,6 +267,16 @@ describe("the release workflow", () => {
       ),
       `job ${name} does not fetch the package's blobs alone and check that before sealing`,
     );
+    // Git only warns when a remote ignores the blob filter, so the seal
+    // refuses a repository that holds a blob it did not check out.
+    const guard = script.match(
+      /if \[ -n "\$\(comm -13 "\$RUNNER_TEMP\/kept" "\$RUNNER_TEMP\/held"\)" \]; then[\s\S]*?\bexit 1\b[\s\S]*?\bfi\b/,
+    );
+    assert.ok(guard, `job ${name} seals without refusing unchecked-out blobs`);
+    assert.ok(
+      script.indexOf(guard[0]) < script.search(/\bopenssl enc\b/),
+      `job ${name} refuses unchecked-out blobs only after sealing`,
+    );
     for (const [other, { steps }] of jobs) {
       for (const step of steps) {
         for (const [, args] of (step.run ?? "").matchAll(
