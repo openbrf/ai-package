@@ -26,23 +26,35 @@ been released yet.
 - **The tarball** is attested by this repository's
   [release workflow](.github/workflows/release.yml), in a run on the release's
   tag. Check it with
-  `gh attestation verify <file>.tgz --repo openbrf/ai-package --source-ref refs/tags/v<version>`,
-  then check that the commit it was attested from is on `main`. A tag of a
-  commit off `main` can carry a workflow of its own that attests and
-  publishes a tarball without the pin checks or the evaluation (see
-  "Releasing"), so the attestation alone does not prove that the workflow on
-  `main` made the tarball:
+  `gh attestation verify <file>.tgz --repo openbrf/ai-package --source-ref refs/tags/v<version> --signer-workflow openbrf/ai-package/.github/workflows/release.yml`,
+  then check that the commit it was attested from is on `main` and holds
+  `main`'s release workflow. A tag of a commit off `main` can carry a
+  workflow of its own that attests and publishes a tarball without the pin
+  checks or the evaluation (see "Releasing"). So can a tag of an earlier
+  commit of `main` whose release workflow differs from `main`'s, such as a
+  commit that a pull request merged without squashing brought in. The
+  attestation alone does not prove that the workflow on `main` made the
+  tarball:
 
   ```sh
   commit=$(gh attestation verify <file>.tgz --repo openbrf/ai-package \
-    --source-ref refs/tags/v<version> --format json \
+    --source-ref refs/tags/v<version> \
+    --signer-workflow openbrf/ai-package/.github/workflows/release.yml \
+    --format json \
     --jq '.[].verificationResult.signature.certificate.sourceRepositoryDigest')
   gh api "repos/openbrf/ai-package/compare/main...$commit" --jq .status
+  f=.github/workflows/release.yml
+  a=$(gh api "repos/openbrf/ai-package/contents/$f?ref=$commit" --jq .sha) &&
+    b=$(gh api "repos/openbrf/ai-package/contents/$f?ref=main" --jq .sha) &&
+    [ "$a" = "$b" ] && echo "$f: same" || echo "$f: DIFFERENT"
   ```
 
-  The second command has to print `identical` or `behind`. The catalog's
-  check of an attestation does not include this yet, so the reviewer of the
-  catalog pull request that lists a version runs it.
+  The compare has to print `identical` or `behind`, and the last line has to
+  read `same`. Once `main` changes its release workflow, a release that the
+  earlier workflow made reads `DIFFERENT`: that version is not listed, and a
+  new version is released from `main` instead. The catalog's check of an attestation does not
+  include this yet, so the reviewer of the catalog pull request that lists a
+  version runs it.
 
 - **The source** is named by the `source.json` packed in the tarball, a copy of
   this repository's `source.json` at the tagged commit. It is Apteo's

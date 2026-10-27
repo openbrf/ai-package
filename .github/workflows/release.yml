@@ -68,8 +68,10 @@
 # secrets and nothing else: before each approval, they check that the run's
 # commit is on main (see "Releasing" in the README). A release.yml that uses
 # no environment asks for no approval, and can still attest a tarball and
-# publish it. So whoever checks a release's attestation also checks that the
-# commit it was attested from is on main (see "What a release proves").
+# publish it, and so can an earlier commit of main whose release.yml differs
+# from main's. So whoever checks a release's attestation also checks that the
+# commit it was attested from is on main and holds main's release.yml (see
+# "What a release proves").
 #
 # The pin is only a commit id, and outside reviewers cannot read the commit it
 # names. So the run builds nothing that is not on the source's `main`, and it
@@ -466,7 +468,7 @@ jobs:
             --draft \
             --verify-tag \
             --title "$TAG" \
-            --notes "Release $TAG of the AI package for Open BRF, built from apteoab/openbrf-modules at $COMMIT, the commit source.json pins, after its prompt-injection evaluation passed on that commit. Verify the tarball with: gh attestation verify $(basename "$FILE") --repo $GITHUB_REPOSITORY --source-ref refs/tags/$TAG, then check that the commit it was attested from is on main, as \"What a release proves\" in the README shows."
+            --notes "Release $TAG of the AI package for Open BRF, built from apteoab/openbrf-modules at $COMMIT, the commit source.json pins, after its prompt-injection evaluation passed on that commit. Verify the tarball with: gh attestation verify $(basename "$FILE") --repo $GITHUB_REPOSITORY --source-ref refs/tags/$TAG --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml, then check that the commit it was attested from is on main and holds main's release workflow, as \"What a release proves\" in the README shows."
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
       # What a catalog entry for this release states.
