@@ -109,7 +109,20 @@ been released yet.
 
    Approve only if both lines read `same`.
 
-4. Once the run has ended, however it ended, replace `SOURCE_ARCHIVE_KEY`:
+4. Once the run has ended, however it ended, replace `SOURCE_ARCHIVE_KEY`.
+   First check that no other release run is queued, waiting for approval or
+   running: runs of different tags are not serialized, and a job reads the
+   environment's secrets when it starts, so a run that is still waiting
+   would start with the new key and fail to open the source sealed with the
+   old one. The command prints nothing when no run is active:
+
+   ```sh
+   gh run list --repo openbrf/ai-package --workflow release.yml --limit 50 \
+     --json databaseId,status,headBranch --jq '.[] | select(.status != "completed")'
+   ```
+
+   Replace the key once it prints nothing, or after the runs it lists have
+   ended:
 
    ```sh
    openssl rand -base64 48 | gh secret set SOURCE_ARCHIVE_KEY --env release --repo openbrf/ai-package
