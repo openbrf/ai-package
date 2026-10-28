@@ -504,3 +504,121 @@ describe("every workflow", async () => {
     }
   }
 });
+
+/**
+ * The check the README gives for a release's attestation, run against a
+ * stand-in for `gh`. The README is the only place the check lives, so the
+ * script that is run is the one a reader copies.
+ */
+describe("the README's check of a release's attestation", async () => {
+  const readme = await readFile(
+    new URL("../README.md", import.meta.url),
+    "utf8",
+  );
+  const snippet = readme
+    .slice(readme.indexOf("## What a release proves"))
+    .match(/```sh\n([\s\S]*?)```/)?.[1]
+    .replace(/^ {2}/gm, "")
+    .replace("<file>", "release")
+    .replace("<version>", "1.0.0");
+  const main = "a".repeat(40);
+  const off = "b".repeat(40);
+
+  /** What the stand-in `gh` answers, from the environment the script runs in. */
+  const stub = `#!/bin/sh
+case "$1 $2" in
+  "attestation verify")
+    case "$*" in *--deny-self-hosted-runners*) ;; *) echo "no self-hosted pin" >&2; exit 2 ;; esac
+    printf '%s' "$ATTESTED" ;;
+  "api repos/openbrf/ai-package/compare/main..."*)
+    case "$2" in *"$MAIN_COMMITS"*) echo identical ;; *) echo diverged ;; esac ;;
+  "api repos/openbrf/ai-package/contents/"*)
+    case "$2" in *"ref=main") echo "$MAIN_SHA" ;; *) echo "$BRANCH_SHA" ;; esac ;;
+esac
+`;
+
+  /** Runs the README's script with the attested commits, one per line. */
+  async function run(attested, env = {}) {
+    const dir = await mkdtemp(join(tmpdir(), "readme-check-"));
+    try {
+      await writeFile(join(dir, "gh"), stub, { mode: 0o755 });
+      const result = spawnSync("sh", ["-c", snippet], {
+        encoding: "utf8",
+        env: {
+          PATH: `${dir}:${process.env.PATH}`,
+          ATTESTED: attested,
+          MAIN_COMMITS: main,
+          MAIN_SHA: "1",
+          BRANCH_SHA: "1",
+          ...env,
+        },
+      });
+      return { ...result, output: result.stdout + result.stderr };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("is in the README, opens with set -eu and pins no self-hosted runner", () => {
+    assert.ok(snippet, "no sh block under 'What a release proves'");
+    assert.match(snippet, /^set -eu\n/);
+    assert.match(snippet, /--deny-self-hosted-runners/);
+  });
+
+  it("says OK for one commit on main that holds main's workflow", async () => {
+    const { status, output } = await run(`${main}\n`);
+    assert.equal(status, 0, output);
+    assert.match(output.trimEnd().split("\n").at(-1), /^OK/);
+  });
+
+  it("refuses an empty commit and prints no OK", async () => {
+    for (const attested of ["", "\n"]) {
+      const { status, output } = await run(attested);
+      assert.notEqual(status, 0, output);
+      assert.match(output, /REFUSED/);
+      assert.doesNotMatch(output, /OK|same/);
+    }
+  });
+
+  it("refuses an attested value that is not a commit id", async () => {
+    for (const attested of ["main", "../x", `${main}0`, "A".repeat(40)]) {
+      const { status, output } = await run(`${attested}\n`);
+      assert.notEqual(status, 0, output);
+      assert.match(output, /REFUSED/);
+    }
+  });
+
+  it("refuses a commit off main", async () => {
+    const { status, output } = await run(`${off}\n`);
+    assert.notEqual(status, 0, output);
+    assert.match(output, /NOT ON MAIN/);
+    assert.doesNotMatch(output, /OK/);
+  });
+
+  it("refuses a commit whose release workflow is not main's", async () => {
+    const { status, output } = await run(`${main}\n`, { BRANCH_SHA: "2" });
+    assert.notEqual(status, 0, output);
+    assert.match(output, /DIFFERENT/);
+    assert.doesNotMatch(output, /OK/);
+  });
+
+  it("makes every attested commit pass, and each only once", async () => {
+    const both = await run(`${main}\n${off}\n${main}\n`);
+    assert.notEqual(both.status, 0, both.output);
+    assert.match(both.output, /NOT ON MAIN/);
+    assert.doesNotMatch(both.output, /OK/);
+    const twice = await run(`${main}\n${main}\n`);
+    assert.equal(twice.status, 0, twice.output);
+    assert.equal(twice.output.match(/OK/g).length, 1);
+  });
+});
+
+describe("the release notes", () => {
+  it("give the check with the self-hosted runner pin", () => {
+    const notes = jobs
+      .flatMap(([, job]) => job.steps ?? [])
+      .map((step) => step.run ?? "")
+      .find((run) => run.includes("gh release create"));
+    assert.match(notes, /gh attestation verify .*--deny-self-hosted-runners/);
+  });
+});
