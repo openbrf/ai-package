@@ -548,6 +548,8 @@ esac
    * result says whether the script asked `gh` to verify the file.
    */
   async function run(attested, env = {}) {
+    // One record per attestation, as `gh` prints them, unless the test says otherwise.
+    const records = attested === "" ? 1 : attested.split("\n").length - 1;
     const dir = await mkdtemp(join(tmpdir(), "readme-check-"));
     try {
       await writeFile(join(dir, "gh"), stub, { mode: 0o755 });
@@ -560,7 +562,7 @@ esac
           PATH: `${dir}:${process.env.PATH}`,
           ATTESTED: attested,
           CALLS: calls,
-          COUNT: "1",
+          COUNT: String(records),
           MAIN_COMMITS: main,
           MAIN_SHA: "1",
           BRANCH_SHA: "1",
@@ -594,7 +596,9 @@ esac
 
   it("fetches every attestation of the file, not gh's first 30", async () => {
     for (const count of ["31", "250"]) {
-      const { status, output } = await run(`${main}\n`, { COUNT: count });
+      const { status, output } = await run(`${main}\n`.repeat(count), {
+        COUNT: count,
+      });
       assert.equal(status, 0, output);
       assert.match(output.trimEnd().split("\n").at(-1), /^OK/);
     }
@@ -610,6 +614,15 @@ esac
       assert.match(output, /HTTP 502/);
       assert.doesNotMatch(output, /OK/);
       assert.equal(verified, false, "verified with a partial count");
+    }
+  });
+
+  it("refuses a result with fewer records than attestations", async () => {
+    for (const count of ["2", "31"]) {
+      const { status, output } = await run(`${main}\n`, { COUNT: count });
+      assert.notEqual(status, 0, output);
+      assert.match(output, new RegExp(`REFUSED: 1 of ${count} attestations`));
+      assert.doesNotMatch(output, /OK/);
     }
   });
 

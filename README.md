@@ -37,7 +37,9 @@ been released yet.
   tarball. A tarball can carry several attestations, and every commit they
   name has to pass. `gh` fetches at most 30 attestations unless it is given a
   larger `--limit`, so the script counts the file's attestations first and
-  fetches all of them:
+  fetches all of them. `gh` also leaves out, without an error, an attestation
+  whose predicate is not the build provenance, so the script refuses a result
+  with fewer records than attestations:
 
   ```sh
   set -eu
@@ -59,6 +61,8 @@ been released yet.
     --deny-self-hosted-runners \
     --format json \
     --jq '.[].verificationResult.signature.certificate.sourceRepositoryDigest' > "$out"
+  verified=$(wc -l < "$out" | tr -d ' ')
+  [ "$verified" -eq "$count" ] || { echo "REFUSED: $verified of $count attestations verified"; exit 1; }
   commits=$(sort -u "$out")
   [ -n "$commits" ] || { echo "REFUSED: no attested commit"; exit 1; }
   # Every line is a commit id, so no empty or blank record is lost to word splitting.
