@@ -47,10 +47,12 @@ been released yet.
     --jq '.[].verificationResult.signature.certificate.sourceRepositoryDigest' |
     sort -u)
   [ -n "$commits" ] || { echo "REFUSED: no attested commit"; exit 1; }
+  # Every line is a commit id, so no empty or blank record is lost to word splitting.
+  if printf '%s\n' "$commits" | LC_ALL=C grep -qvxE '[0-9a-f]{40}'; then
+    echo "REFUSED: not a commit id"; exit 1
+  fi
   f=.github/workflows/release.yml
   for commit in $commits; do
-    case $commit in *[!0-9a-f]*) commit= ;; esac
-    [ "${#commit}" -eq 40 ] || { echo "REFUSED: not a commit id"; exit 1; }
     status=$(gh api "repos/openbrf/ai-package/compare/main...$commit" --jq .status)
     case $status in
       identical | behind) ;;

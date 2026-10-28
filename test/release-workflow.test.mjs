@@ -580,6 +580,24 @@ esac
     }
   });
 
+  it("refuses a blank record, alone or beside a commit id", async () => {
+    for (const attested of [
+      " \n",
+      "\t\n",
+      "\n\n",
+      `${main}\n\n`,
+      `\n${main}\n`,
+      `${main}\n \n`,
+      `${main}\n\n${main}\n`,
+      `${main}\r\n`,
+    ]) {
+      const { status, output } = await run(attested);
+      assert.notEqual(status, 0, JSON.stringify(attested) + output);
+      assert.match(output, /REFUSED/);
+      assert.doesNotMatch(output, /OK/);
+    }
+  });
+
   it("refuses an attested value that is not a commit id", async () => {
     for (const attested of ["main", "../x", `${main}0`, "A".repeat(40)]) {
       const { status, output } = await run(`${attested}\n`);
