@@ -26,7 +26,7 @@ been released yet.
 - **The tarball** is attested by this repository's
   [release workflow](.github/workflows/release.yml), in a run on the release's
   tag. Check it with
-  `gh attestation verify <file>.tgz --repo openbrf/ai-package --source-ref refs/tags/v<version> --signer-workflow openbrf/ai-package/.github/workflows/release.yml`,
+  `gh attestation verify <file>.tgz --repo openbrf/ai-package --source-ref refs/tags/v<version> --signer-workflow openbrf/ai-package/.github/workflows/release.yml --deny-self-hosted-runners`,
   then check that the commit it was attested from is on `main` and holds
   `main`'s release workflow. A tag of a commit off `main` can carry a
   workflow of its own that attests and publishes a tarball without the pin
@@ -34,27 +34,69 @@ been released yet.
   commit of `main` whose release workflow differs from `main`'s, such as a
   commit that a pull request merged without squashing brought in. The
   attestation alone does not prove that the workflow on `main` made the
-  tarball:
+  tarball. A tarball can carry several attestations, and every commit they
+  name has to pass. `gh` fetches at most 30 attestations unless it is given a
+  larger `--limit`, so the script counts the file's attestations first and
+  fetches all of them. `gh` also leaves out, without an error, an attestation
+  whose predicate is not the build provenance, so the script refuses a result
+  with fewer records than attestations:
 
   ```sh
-  commit=$(gh attestation verify <file>.tgz --repo openbrf/ai-package \
+  set -eu
+  file=<file>.tgz
+  # gh fetches 30 attestations unless told more, so count the file's, and ask for all of them.
+  digest=$(sha256sum "$file" 2>/dev/null || shasum -a 256 "$file")
+  # gh writes a page before it asks for the next, so a pipe from it would count the pages
+  # written before a failure and hide the failure. Write to a file, which set -e checks.
+  out=$(mktemp)
+  trap 'rm -f "$out"' EXIT
+  gh api --paginate "repos/openbrf/ai-package/attestations/sha256:${digest%% *}" \
+    --jq '.attestations[] | 1' > "$out"
+  count=$(wc -l < "$out" | tr -d ' ')
+  [ "$count" -gt 0 ] || { echo "REFUSED: no attestation"; exit 1; }
+  gh attestation verify "$file" --repo openbrf/ai-package \
+    --limit "$count" \
     --source-ref refs/tags/v<version> \
     --signer-workflow openbrf/ai-package/.github/workflows/release.yml \
+    --deny-self-hosted-runners \
     --format json \
-    --jq '.[].verificationResult.signature.certificate.sourceRepositoryDigest')
-  gh api "repos/openbrf/ai-package/compare/main...$commit" --jq .status
+    --jq '.[].verificationResult.signature.certificate.sourceRepositoryDigest' > "$out"
+  verified=$(wc -l < "$out" | tr -d ' ')
+  [ "$verified" -eq "$count" ] || { echo "REFUSED: $verified of $count attestations verified"; exit 1; }
+  commits=$(sort -u "$out")
+  [ -n "$commits" ] || { echo "REFUSED: no attested commit"; exit 1; }
+  # Every line is a commit id, so no empty or blank record is lost to word splitting.
+  if printf '%s\n' "$commits" | LC_ALL=C grep -qvxE '[0-9a-f]{40}'; then
+    echo "REFUSED: not a commit id"; exit 1
+  fi
   f=.github/workflows/release.yml
-  a=$(gh api "repos/openbrf/ai-package/contents/$f?ref=$commit" --jq .sha) &&
-    b=$(gh api "repos/openbrf/ai-package/contents/$f?ref=main" --jq .sha) &&
-    [ "$a" = "$b" ] && echo "$f: same" || echo "$f: DIFFERENT"
+  for commit in $commits; do
+    status=$(gh api "repos/openbrf/ai-package/compare/main...$commit" --jq .status)
+    case $status in
+      identical | behind) ;;
+      *) echo "NOT ON MAIN: $commit"; exit 1 ;;
+    esac
+    a=$(gh api "repos/openbrf/ai-package/contents/$f?ref=$commit" --jq .sha)
+    b=$(gh api "repos/openbrf/ai-package/contents/$f?ref=main" --jq .sha)
+    [ -n "$a" ] && [ "$a" = "$b" ] || { echo "DIFFERENT: $f at $commit"; exit 1; }
+  done
+  echo "OK: every attested commit is on main and holds main's $f"
   ```
 
-  The compare has to print `identical` or `behind`, and the last line has to
-  read `same`. Once `main` changes its release workflow, a release that the
-  earlier workflow made reads `DIFFERENT`: that version is not listed, and a
-  new version is released from `main` instead. The catalog's check of an attestation does not
-  include this yet, so the reviewer of the catalog pull request that lists a
-  version runs it.
+  The script stops at the first failure and exits with a non-zero status
+  unless it prints `OK` as its last line. A failure prints `REFUSED`,
+  `NOT ON MAIN` or `DIFFERENT`, or the error of a `gh` command that failed.
+  Once `main` changes its release workflow, a release that the earlier
+  workflow made reads `DIFFERENT`: that version is not listed, and a new
+  version is released from `main` instead. The catalog's check of an
+  attestation does not include this yet, so the reviewer of the catalog pull
+  request that lists a version runs it.
+
+  The check was written against `gh` v2.103.0 and verified with that version;
+  use that or a later one. `--deny-self-hosted-runners` makes the verification
+  fail for an attestation made on a self-hosted runner, which the release
+  workflow never uses. A `gh` that does not know the flag fails on it, so
+  update `gh` rather than drop the flag.
 
 - **The source** is named by the `source.json` packed in the tarball, a copy of
   this repository's `source.json` at the tagged commit. It is Apteo's

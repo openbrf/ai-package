@@ -468,7 +468,7 @@ jobs:
             --draft \
             --verify-tag \
             --title "$TAG" \
-            --notes "Release $TAG of the AI package for Open BRF, built from apteoab/openbrf-modules at $COMMIT, the commit source.json pins, after its prompt-injection evaluation passed on that commit. Verify the tarball with: gh attestation verify $(basename "$FILE") --repo $GITHUB_REPOSITORY --source-ref refs/tags/$TAG --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml, then check that the commit it was attested from is on main and holds main's release workflow, as \"What a release proves\" in the README shows."
+            --notes "Release $TAG of the AI package for Open BRF, built from apteoab/openbrf-modules at $COMMIT, the commit source.json pins, after its prompt-injection evaluation passed on that commit. Verify the tarball with: gh attestation verify $(basename "$FILE") --repo $GITHUB_REPOSITORY --source-ref refs/tags/$TAG --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --deny-self-hosted-runners (gh v2.103.0 or later), then check that every commit it was attested from is on main and holds main's release workflow, as \"What a release proves\" in the README shows."
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
       # What a catalog entry for this release states.
