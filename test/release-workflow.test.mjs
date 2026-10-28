@@ -523,6 +523,7 @@ describe("the README's check of a release's attestation", async () => {
     .replace("<version>", "1.0.0");
   const main = "a".repeat(40);
   const off = "b".repeat(40);
+  const head = "c".repeat(40);
 
   /** What the stand-in `gh` answers, from the environment the script runs in. */
   const stub = `#!/bin/sh
@@ -531,15 +532,22 @@ case "$1 $2" in
     echo verify >> "$CALLS"
     case "$*" in *--deny-self-hosted-runners*) ;; *) echo "no self-hosted pin" >&2; exit 2 ;; esac
     case "$*" in *"--limit $COUNT "*) ;; *) echo "not every attestation fetched" >&2; exit 2 ;; esac
-    printf '%s' "$ATTESTED" ;;
+    printf '%s' "$ATTESTED"
+    if [ -n "$VERIFY_FAIL" ]; then echo "gh: verification failed" >&2; exit 1; fi ;;
   "api --paginate")
     case "$3" in repos/openbrf/ai-package/attestations/sha256:*) ;; *) exit 2 ;; esac
     i=0; while [ "$i" -lt "$COUNT" ]; do echo 1; i=$((i + 1)); done
     if [ -n "$PAGES_FAIL" ]; then echo "gh: HTTP 502" >&2; exit 1; fi ;;
-  "api repos/openbrf/ai-package/compare/main..."*)
-    case "$2" in *"$MAIN_COMMITS"*) echo identical ;; *) echo diverged ;; esac ;;
+  "api repos/openbrf/ai-package/git/ref/heads/main")
+    printf '%s\n' "$MAIN_HEAD" ;;
+  "api repos/openbrf/ai-package/compare/$MAIN_HEAD..."*)
+    case "\${2##*...}" in "$MAIN_COMMITS" | "$MAIN_HEAD") echo identical ;; *) echo diverged ;; esac ;;
   "api repos/openbrf/ai-package/contents/"*)
-    case "$2" in *"ref=main") echo "$MAIN_SHA" ;; *) echo "$BRANCH_SHA" ;; esac ;;
+    # A tag named main could answer for a bare main, so only the branch's commit id is allowed.
+    case "$2" in *"ref=main") echo "bare main: a tag may shadow the branch" >&2; exit 2 ;; esac
+    case "$2" in *"ref=$MAIN_HEAD") echo "$MAIN_SHA" ;; *) echo "$BRANCH_SHA" ;; esac ;;
+  "api repos/openbrf/ai-package/compare/"*)
+    echo "bare main: a tag may shadow the branch" >&2; exit 2 ;;
 esac
 `;
 
@@ -563,6 +571,7 @@ esac
           ATTESTED: attested,
           CALLS: calls,
           COUNT: String(records),
+          MAIN_HEAD: head,
           MAIN_COMMITS: main,
           MAIN_SHA: "1",
           BRANCH_SHA: "1",
@@ -586,6 +595,10 @@ esac
     assert.ok(snippet, "no sh block under 'What a release proves'");
     assert.match(snippet, /^set -eu\n/);
     assert.match(snippet, /--deny-self-hosted-runners/);
+  });
+
+  it("turns off globbing before it splits the commit ids", () => {
+    assert.match(snippet, /^set -f$/m);
   });
 
   it("says OK for one commit on main that holds main's workflow", async () => {
@@ -666,6 +679,29 @@ esac
       assert.notEqual(status, 0, output);
       assert.match(output, /REFUSED/);
     }
+  });
+
+  it("compares with the commit id of the main branch, never a bare main", async () => {
+    // The stand-in fails any call that still names main, as a tag named main may shadow it.
+    const { status, output } = await run(`${main}\n${head}\n`);
+    assert.equal(status, 0, output);
+    assert.doesNotMatch(output, /bare main/);
+  });
+
+  it("refuses a main that is not a commit id", async () => {
+    for (const head of ["", "main", "A".repeat(40), `${main}0`, `${main}\n${main}`]) {
+      const { status, output } = await run(`${main}\n`, { MAIN_HEAD: head });
+      assert.notEqual(status, 0, JSON.stringify(head) + output);
+      assert.match(output, /REFUSED: main is not a commit id/);
+      assert.doesNotMatch(output, /OK/);
+    }
+  });
+
+  it("fails when gh cannot verify the file, whatever it printed", async () => {
+    const { status, output } = await run(`${main}\n`, { VERIFY_FAIL: "1" });
+    assert.notEqual(status, 0, output);
+    assert.match(output, /verification failed/);
+    assert.doesNotMatch(output, /OK/);
   });
 
   it("refuses a commit off main", async () => {

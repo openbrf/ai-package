@@ -39,11 +39,27 @@ been released yet.
   larger `--limit`, so the script counts the file's attestations first and
   fetches all of them. `gh` also leaves out, without an error, an attestation
   whose predicate is not the build provenance, so the script refuses a result
-  with fewer records than attestations:
+  with fewer records than attestations. GitHub may read a bare `main` as a
+  tag of that name, so the script asks for the branch by its full ref and
+  compares with the commit id it gets.
+
+  Save the script to a file and run it with `sh check.sh`, or give it to `sh`
+  on its input (`sh <<'EOF'`). Do not paste it into your shell: `set -eu` and
+  `exit 1` would end an interactive shell, and zsh does not split `$commits`
+  into words as `sh` does.
 
   ```sh
   set -eu
+  # No globbing: nothing in the script is a pattern.
+  set -f
   file=<file>.tgz
+  # A tag can be named main, so ask for the branch by its full ref, and use its commit id
+  # wherever the script would otherwise write main.
+  m=$(gh api repos/openbrf/ai-package/git/ref/heads/main --jq .object.sha)
+  case $m in
+    *[!0123456789abcdef]*) echo "REFUSED: main is not a commit id"; exit 1 ;;
+  esac
+  [ "${#m}" -eq 40 ] || { echo "REFUSED: main is not a commit id"; exit 1; }
   # gh fetches 30 attestations unless told more, so count the file's, and ask for all of them.
   digest=$(sha256sum "$file" 2>/dev/null || shasum -a 256 "$file")
   # gh writes a page before it asks for the next, so a pipe from it would count the pages
@@ -71,13 +87,13 @@ been released yet.
   fi
   f=.github/workflows/release.yml
   for commit in $commits; do
-    status=$(gh api "repos/openbrf/ai-package/compare/main...$commit" --jq .status)
+    status=$(gh api "repos/openbrf/ai-package/compare/$m...$commit" --jq .status)
     case $status in
       identical | behind) ;;
       *) echo "NOT ON MAIN: $commit"; exit 1 ;;
     esac
     a=$(gh api "repos/openbrf/ai-package/contents/$f?ref=$commit" --jq .sha)
-    b=$(gh api "repos/openbrf/ai-package/contents/$f?ref=main" --jq .sha)
+    b=$(gh api "repos/openbrf/ai-package/contents/$f?ref=$m" --jq .sha)
     [ -n "$a" ] && [ "$a" = "$b" ] || { echo "DIFFERENT: $f at $commit"; exit 1; }
   done
   echo "OK: every attested commit is on main and holds main's $f"
@@ -132,8 +148,15 @@ been released yet.
    commit, shown on the run's page, is on `main`:
 
    ```sh
-   gh api repos/openbrf/ai-package/compare/main...<commit> --jq .status
+   m=$(gh api repos/openbrf/ai-package/git/ref/heads/main --jq .object.sha)
+   echo "$m"
+   gh api repos/openbrf/ai-package/compare/$m...<commit> --jq .status
    ```
+
+   `main` is asked for by its full ref, so a tag named `main` cannot stand in
+   for it. The first line prints 40 hexadecimal characters; if it prints
+   anything else, approve nothing. Run the next command in the same shell, as
+   it uses `$m`.
 
    It prints `identical` for the head of `main` and `behind` for an earlier
    commit of `main`; approve nothing else. For a `behind` commit, approve only
@@ -144,7 +167,7 @@ been released yet.
    ```sh
    for f in .github/workflows/release.yml source.json; do
      a=$(gh api "repos/openbrf/ai-package/contents/$f?ref=<commit>" --jq .sha) &&
-       b=$(gh api "repos/openbrf/ai-package/contents/$f?ref=main" --jq .sha) &&
+       b=$(gh api "repos/openbrf/ai-package/contents/$f?ref=$m" --jq .sha) &&
        [ "$a" = "$b" ] && echo "$f: same" || echo "$f: DIFFERENT, approve nothing"
    done
    ```
