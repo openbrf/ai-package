@@ -529,7 +529,11 @@ describe("the README's check of a release's attestation", async () => {
 case "$1 $2" in
   "attestation verify")
     case "$*" in *--deny-self-hosted-runners*) ;; *) echo "no self-hosted pin" >&2; exit 2 ;; esac
+    case "$*" in *"--limit $COUNT "*) ;; *) echo "not every attestation fetched" >&2; exit 2 ;; esac
     printf '%s' "$ATTESTED" ;;
+  "api --paginate")
+    case "$3" in repos/openbrf/ai-package/attestations/sha256:*) ;; *) exit 2 ;; esac
+    i=0; while [ "$i" -lt "$COUNT" ]; do echo 1; i=$((i + 1)); done ;;
   "api repos/openbrf/ai-package/compare/main..."*)
     case "$2" in *"$MAIN_COMMITS"*) echo identical ;; *) echo diverged ;; esac ;;
   "api repos/openbrf/ai-package/contents/"*)
@@ -542,11 +546,14 @@ esac
     const dir = await mkdtemp(join(tmpdir(), "readme-check-"));
     try {
       await writeFile(join(dir, "gh"), stub, { mode: 0o755 });
+      await writeFile(join(dir, "release.tgz"), "tarball");
       const result = spawnSync("sh", ["-c", snippet], {
+        cwd: dir,
         encoding: "utf8",
         env: {
           PATH: `${dir}:${process.env.PATH}`,
           ATTESTED: attested,
+          COUNT: "1",
           MAIN_COMMITS: main,
           MAIN_SHA: "1",
           BRANCH_SHA: "1",
@@ -569,6 +576,21 @@ esac
     const { status, output } = await run(`${main}\n`);
     assert.equal(status, 0, output);
     assert.match(output.trimEnd().split("\n").at(-1), /^OK/);
+  });
+
+  it("fetches every attestation of the file, not gh's first 30", async () => {
+    for (const count of ["31", "250"]) {
+      const { status, output } = await run(`${main}\n`, { COUNT: count });
+      assert.equal(status, 0, output);
+      assert.match(output.trimEnd().split("\n").at(-1), /^OK/);
+    }
+  });
+
+  it("refuses a file with no attestation", async () => {
+    const { status, output } = await run(`${main}\n`, { COUNT: "0" });
+    assert.notEqual(status, 0, output);
+    assert.match(output, /REFUSED/);
+    assert.doesNotMatch(output, /OK/);
   });
 
   it("refuses an empty commit and prints no OK", async () => {

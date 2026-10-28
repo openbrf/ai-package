@@ -35,11 +35,20 @@ been released yet.
   commit that a pull request merged without squashing brought in. The
   attestation alone does not prove that the workflow on `main` made the
   tarball. A tarball can carry several attestations, and every commit they
-  name has to pass:
+  name has to pass. `gh` fetches at most 30 attestations unless it is given a
+  larger `--limit`, so the script counts the file's attestations first and
+  fetches all of them:
 
   ```sh
   set -eu
-  commits=$(gh attestation verify <file>.tgz --repo openbrf/ai-package \
+  file=<file>.tgz
+  # gh fetches 30 attestations unless told more, so count the file's, and ask for all of them.
+  digest=$(sha256sum "$file" 2>/dev/null || shasum -a 256 "$file")
+  count=$(gh api --paginate "repos/openbrf/ai-package/attestations/sha256:${digest%% *}" \
+    --jq '.attestations[] | 1' | wc -l | tr -d ' ')
+  [ "$count" -gt 0 ] || { echo "REFUSED: no attestation"; exit 1; }
+  commits=$(gh attestation verify "$file" --repo openbrf/ai-package \
+    --limit "$count" \
     --source-ref refs/tags/v<version> \
     --signer-workflow openbrf/ai-package/.github/workflows/release.yml \
     --deny-self-hosted-runners \
