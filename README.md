@@ -44,17 +44,22 @@ been released yet.
   file=<file>.tgz
   # gh fetches 30 attestations unless told more, so count the file's, and ask for all of them.
   digest=$(sha256sum "$file" 2>/dev/null || shasum -a 256 "$file")
-  count=$(gh api --paginate "repos/openbrf/ai-package/attestations/sha256:${digest%% *}" \
-    --jq '.attestations[] | 1' | wc -l | tr -d ' ')
+  # gh writes a page before it asks for the next, so a pipe from it would count the pages
+  # written before a failure and hide the failure. Write to a file, which set -e checks.
+  out=$(mktemp)
+  trap 'rm -f "$out"' EXIT
+  gh api --paginate "repos/openbrf/ai-package/attestations/sha256:${digest%% *}" \
+    --jq '.attestations[] | 1' > "$out"
+  count=$(wc -l < "$out" | tr -d ' ')
   [ "$count" -gt 0 ] || { echo "REFUSED: no attestation"; exit 1; }
-  commits=$(gh attestation verify "$file" --repo openbrf/ai-package \
+  gh attestation verify "$file" --repo openbrf/ai-package \
     --limit "$count" \
     --source-ref refs/tags/v<version> \
     --signer-workflow openbrf/ai-package/.github/workflows/release.yml \
     --deny-self-hosted-runners \
     --format json \
-    --jq '.[].verificationResult.signature.certificate.sourceRepositoryDigest' |
-    sort -u)
+    --jq '.[].verificationResult.signature.certificate.sourceRepositoryDigest' > "$out"
+  commits=$(sort -u "$out")
   [ -n "$commits" ] || { echo "REFUSED: no attested commit"; exit 1; }
   # Every line is a commit id, so no empty or blank record is lost to word splitting.
   if printf '%s\n' "$commits" | LC_ALL=C grep -qvxE '[0-9a-f]{40}'; then

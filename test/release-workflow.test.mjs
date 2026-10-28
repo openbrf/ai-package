@@ -528,12 +528,14 @@ describe("the README's check of a release's attestation", async () => {
   const stub = `#!/bin/sh
 case "$1 $2" in
   "attestation verify")
+    echo verify >> "$CALLS"
     case "$*" in *--deny-self-hosted-runners*) ;; *) echo "no self-hosted pin" >&2; exit 2 ;; esac
     case "$*" in *"--limit $COUNT "*) ;; *) echo "not every attestation fetched" >&2; exit 2 ;; esac
     printf '%s' "$ATTESTED" ;;
   "api --paginate")
     case "$3" in repos/openbrf/ai-package/attestations/sha256:*) ;; *) exit 2 ;; esac
-    i=0; while [ "$i" -lt "$COUNT" ]; do echo 1; i=$((i + 1)); done ;;
+    i=0; while [ "$i" -lt "$COUNT" ]; do echo 1; i=$((i + 1)); done
+    if [ -n "$PAGES_FAIL" ]; then echo "gh: HTTP 502" >&2; exit 1; fi ;;
   "api repos/openbrf/ai-package/compare/main..."*)
     case "$2" in *"$MAIN_COMMITS"*) echo identical ;; *) echo diverged ;; esac ;;
   "api repos/openbrf/ai-package/contents/"*)
@@ -541,18 +543,23 @@ case "$1 $2" in
 esac
 `;
 
-  /** Runs the README's script with the attested commits, one per line. */
+  /**
+   * Runs the README's script with the attested commits, one per line. The
+   * result says whether the script asked `gh` to verify the file.
+   */
   async function run(attested, env = {}) {
     const dir = await mkdtemp(join(tmpdir(), "readme-check-"));
     try {
       await writeFile(join(dir, "gh"), stub, { mode: 0o755 });
       await writeFile(join(dir, "release.tgz"), "tarball");
+      const calls = join(dir, "calls");
       const result = spawnSync("sh", ["-c", snippet], {
         cwd: dir,
         encoding: "utf8",
         env: {
           PATH: `${dir}:${process.env.PATH}`,
           ATTESTED: attested,
+          CALLS: calls,
           COUNT: "1",
           MAIN_COMMITS: main,
           MAIN_SHA: "1",
@@ -560,7 +567,14 @@ esac
           ...env,
         },
       });
-      return { ...result, output: result.stdout + result.stderr };
+      return {
+        ...result,
+        output: result.stdout + result.stderr,
+        verified: await readFile(calls, "utf8").then(
+          () => true,
+          () => false,
+        ),
+      };
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -583,6 +597,19 @@ esac
       const { status, output } = await run(`${main}\n`, { COUNT: count });
       assert.equal(status, 0, output);
       assert.match(output.trimEnd().split("\n").at(-1), /^OK/);
+    }
+  });
+
+  it("fails when a later page of attestations cannot be fetched", async () => {
+    for (const count of ["1", "100"]) {
+      const { status, output, verified } = await run(`${main}\n`, {
+        COUNT: count,
+        PAGES_FAIL: "1",
+      });
+      assert.notEqual(status, 0, output);
+      assert.match(output, /HTTP 502/);
+      assert.doesNotMatch(output, /OK/);
+      assert.equal(verified, false, "verified with a partial count");
     }
   });
 
